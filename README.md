@@ -29,7 +29,7 @@ Create `.ai-hooks.yml` in your project root:
 
 ```yaml
 provider: claude            # claude | openai | ollama
-model: claude-sonnet-4-5-20250514    # model to use
+model: claude-sonnet-4-6    # model to use
 
 hooks:
   pre-commit:

@@ -151,7 +151,7 @@ load_config() {
 
   if [[ -z "${MODEL}" ]]; then
     case "${PROVIDER}" in
-      claude)  MODEL="claude-sonnet-4-5-20250514" ;;
+      claude)  MODEL="claude-sonnet-4-6" ;;
       openai)  MODEL="gpt-4o" ;;
       ollama)  MODEL="llama3.1" ;;
     esac
