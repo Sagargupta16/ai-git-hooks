@@ -1,6 +1,6 @@
 # AI Git Hooks
 
-> AI-powered git hooks that review your code, generate commit messages, catch bugs, and scan for security issues — before you push.
+> AI-powered git hooks that review your code, generate commit messages, catch bugs, and scan for security issues - before you push.
 
 Drop-in git hooks that use AI (Claude, OpenAI, Ollama) to automate code quality checks at every stage of your git workflow.
 
@@ -67,7 +67,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 # OpenAI
 export OPENAI_API_KEY="sk-..."
 
-# Ollama (free, local — no key needed)
+# Ollama (free, local - no key needed)
 export OLLAMA_HOST="http://localhost:11434"
 ```
 
@@ -174,7 +174,7 @@ echo 'model: llama3.1' >> .ai-hooks.yml
 
 ## Contributing
 
-Contributions welcome — new hooks, better prompts, new AI providers, or bug fixes.
+Contributions welcome - new hooks, better prompts, new AI providers, or bug fixes.
 
 1. Fork this repo
 2. Create a feature branch
