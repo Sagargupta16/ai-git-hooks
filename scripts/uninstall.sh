@@ -42,13 +42,9 @@ TARGET_DIR="${1:-$(pwd)}"
 GIT_DIR="${TARGET_DIR}/.git"
 HOOKS_DIR="${GIT_DIR}/hooks"
 
-# Hook names and their identifying strings
-declare -A HOOK_IDENTIFIERS=(
-  ["pre-commit"]="AI Code Review"
-  ["prepare-commit-msg"]="Commit Message Generator"
-  ["commit-msg"]="Commit Message Validator"
-  ["pre-push"]="Pre-Push Security Scan"
-)
+# Hook names and their identifying strings (parallel arrays for bash 3.2 compat)
+HOOK_NAMES=("pre-commit" "prepare-commit-msg" "commit-msg" "pre-push")
+HOOK_IDENTIFIERS=("AI Code Review" "Commit Message Generator" "Commit Message Validator" "Pre-Push Security Scan")
 
 # --- Validation ---
 
@@ -74,9 +70,10 @@ main() {
   local removed=0
   local skipped=0
 
-  for hook_name in "${!HOOK_IDENTIFIERS[@]}"; do
+  for i in "${!HOOK_NAMES[@]}"; do
+    local hook_name="${HOOK_NAMES[$i]}"
     local hook_file="${HOOKS_DIR}/${hook_name}"
-    local identifier="${HOOK_IDENTIFIERS[${hook_name}]}"
+    local identifier="${HOOK_IDENTIFIERS[$i]}"
     local backup_file="${HOOKS_DIR}/${hook_name}.backup"
 
     if [[ ! -f "${hook_file}" ]]; then
