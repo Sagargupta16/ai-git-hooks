@@ -1,5 +1,10 @@
 # AI Git Hooks
 
+![GitHub stars](https://img.shields.io/github/stars/Sagargupta16/ai-git-hooks?style=flat-square)
+![GitHub forks](https://img.shields.io/github/forks/Sagargupta16/ai-git-hooks?style=flat-square)
+![License](https://img.shields.io/github/license/Sagargupta16/ai-git-hooks?style=flat-square)
+![Last Commit](https://img.shields.io/github/last-commit/Sagargupta16/ai-git-hooks?style=flat-square)
+
 > AI-powered git hooks that review your code, generate commit messages, catch bugs, and scan for security issues - before you push.
 
 Drop-in git hooks that use AI (Claude, OpenAI, Ollama) to automate code quality checks at every stage of your git workflow.
@@ -182,6 +187,15 @@ Contributions welcome - new hooks, better prompts, new AI providers, or bug fixe
 4. Submit a PR
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
+
+## More AI Developer Tools
+
+| Project | Description |
+|---------|-------------|
+| [claude-cost-optimizer](https://github.com/Sagargupta16/claude-cost-optimizer) | Save 30-60% on Claude Code costs - proven strategies and benchmarks |
+| [claude-code-recipes](https://github.com/Sagargupta16/claude-code-recipes) | 50+ copy-paste recipes for Claude Code - commands, subagents, hooks, skills |
+| [mcp-toolkit](https://github.com/Sagargupta16/mcp-toolkit) | Production-ready middleware for MCP servers - auth, caching, rate limiting |
+| [agent-recipes](https://github.com/Sagargupta16/agent-recipes) | AI agent workflows for real-world dev tasks - code review, testing, security |
 
 ## License
 
