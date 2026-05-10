@@ -65,6 +65,7 @@ print_debug() {
 # Reads .ai-hooks.yml using basic shell parsing (no external YAML library).
 # Falls back to sensible defaults if config is missing.
 
+# shellcheck disable=SC2034  # HOOK_DIR reserved for future path-relative config resolution
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 CONFIG_FILE="${REPO_ROOT}/.ai-hooks.yml"
@@ -80,6 +81,7 @@ MAX_DIFF_LINES="500"
 CUSTOM_PROMPT=""
 IGNORE_PATTERNS=()
 DRY_RUN="${AI_HOOKS_DRY_RUN:-0}"
+# shellcheck disable=SC2034  # DEBUG consumed via set -x inside run_provider; shellcheck misses dynamic use
 DEBUG="${AI_HOOKS_DEBUG:-0}"
 
 # Simple YAML value reader: reads a top-level or nested key from the config.
@@ -139,12 +141,10 @@ yaml_get_list() {
     return 1
   fi
 
-  # Navigate to the section, extract list items
-  local in_section=0
-  local depth=0
-
-  # For "hooks.pre-commit.ignore" we need nested parsing
-  # Simplified approach: search for the ignore block under pre-commit
+  # Navigate to the section, extract list items.
+  # Simplified approach: search for the ignore block under pre-commit using
+  # two nested sed ranges. (Full nested-depth tracking left as a TODO for a
+  # proper YAML parser if shell-only parsing grows unwieldy.)
   local block
   block=$(sed -n '/pre-commit:/,/^  [a-z]/p' "${file}" | sed -n "/    ${section_key}:/,/^    [a-z]/p")
   echo "${block}" | grep '^ *- ' | sed 's/^ *- *//' | sed 's/"//g' | sed "s/'//g"
@@ -544,6 +544,7 @@ main() {
   fi
 
   print_info "Reviewing ${file_count} file(s)..."
+  # shellcheck disable=SC2001  # line-anchored replacement doesn't fit ${var//s/r}
   echo -e "${DIM}$(echo "${staged_files}" | sed 's/^/  /')${RESET}"
   echo ""
 
