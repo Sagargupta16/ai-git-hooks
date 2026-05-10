@@ -81,8 +81,8 @@ MAX_DIFF_LINES="500"
 CUSTOM_PROMPT=""
 IGNORE_PATTERNS=()
 DRY_RUN="${AI_HOOKS_DRY_RUN:-0}"
-# shellcheck disable=SC2034  # DEBUG consumed via set -x inside run_provider; shellcheck misses dynamic use
-DEBUG="${AI_HOOKS_DEBUG:-0}"
+# NOTE: no local DEBUG var — debug output uses AI_HOOKS_DEBUG env directly
+# (see print_debug). Keeps shellcheck SC2034 happy without suppressions.
 
 # Simple YAML value reader: reads a top-level or nested key from the config.
 # Usage: yaml_get "key" or yaml_get "parent.child"
@@ -165,7 +165,7 @@ load_config() {
   val=$(yaml_get "max_tokens") && [[ -n "${val}" ]] && MAX_TOKENS="${val}"
   val=$(yaml_get "timeout") && [[ -n "${val}" ]] && TIMEOUT="${val}"
   val=$(yaml_get "dry_run") && [[ "${val}" == "true" ]] && DRY_RUN="1"
-  val=$(yaml_get "debug") && [[ "${val}" == "true" ]] && DEBUG="1"
+  # debug flag is read from the AI_HOOKS_DEBUG env var at call sites, not stored here
 
   # Hook-specific settings
   val=$(yaml_get "hooks.pre-commit.enabled") && [[ "${val}" == "false" ]] && {
