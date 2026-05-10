@@ -144,7 +144,6 @@ load_config() {
   local val
 
   val=$(yaml_get "dry_run") && [[ "${val}" == "true" ]] && DRY_RUN="1"
-  val=$(yaml_get "debug") && [[ "${val}" == "true" ]] && DEBUG="1"
 
   val=$(yaml_get "hooks.pre-push.enabled") && [[ "${val}" == "false" ]] && {
     print_debug "pre-push hook is disabled. Skipping."
