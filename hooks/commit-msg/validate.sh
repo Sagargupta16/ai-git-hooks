@@ -71,7 +71,6 @@ MAX_LENGTH="72"
 ALLOWED_TYPES="feat fix docs style refactor perf test build ci chore revert"
 SUGGEST_FIX="true"
 DRY_RUN="${AI_HOOKS_DRY_RUN:-0}"
-DEBUG="${AI_HOOKS_DEBUG:-0}"
 
 yaml_get() {
   local key="$1"

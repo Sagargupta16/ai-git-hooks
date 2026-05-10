@@ -84,7 +84,6 @@ TICKET_PREFIX="true"
 MAX_LENGTH="72"
 CUSTOM_PROMPT=""
 DRY_RUN="${AI_HOOKS_DRY_RUN:-0}"
-DEBUG="${AI_HOOKS_DEBUG:-0}"
 
 yaml_get() {
   local key="$1"
