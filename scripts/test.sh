@@ -220,7 +220,7 @@ test_prepare_commit_msg() {
   echo "" > "${msg_file}"
   if output=$(bash "${hook}" "${msg_file}" "" 2>&1); then
     local generated
-    generated=$(cat "${msg_file}" | head -1)
+    generated=$(head -1 "${msg_file}")
     if [[ -n "${generated}" ]]; then
       pass "Dry-run: generates mock message: '${generated}'"
     else
@@ -448,10 +448,12 @@ test_install() {
   if output=$(bash "${install_script}" "${REPO_ROOT}" 2>&1); then
     # Verify hooks were installed
     local hooks_installed=0
-    [[ -f "${TEST_DIR}/.git/hooks/pre-commit" ]] && ((hooks_installed++)) || true
-    [[ -f "${TEST_DIR}/.git/hooks/prepare-commit-msg" ]] && ((hooks_installed++)) || true
-    [[ -f "${TEST_DIR}/.git/hooks/commit-msg" ]] && ((hooks_installed++)) || true
-    [[ -f "${TEST_DIR}/.git/hooks/pre-push" ]] && ((hooks_installed++)) || true
+    local hook_name
+    for hook_name in pre-commit prepare-commit-msg commit-msg pre-push; do
+      if [[ -f "${TEST_DIR}/.git/hooks/${hook_name}" ]]; then
+        hooks_installed=$((hooks_installed + 1))
+      fi
+    done
 
     if [[ "${hooks_installed}" -eq 4 ]]; then
       pass "install.sh: all 4 hooks installed"
@@ -479,10 +481,12 @@ test_install() {
   # Test: Uninstall from the test repo
   if output=$(echo "n" | bash "${uninstall_script}" "${TEST_DIR}" 2>&1); then
     local hooks_remaining=0
-    [[ -f "${TEST_DIR}/.git/hooks/pre-commit" ]] && ((hooks_remaining++)) || true
-    [[ -f "${TEST_DIR}/.git/hooks/prepare-commit-msg" ]] && ((hooks_remaining++)) || true
-    [[ -f "${TEST_DIR}/.git/hooks/commit-msg" ]] && ((hooks_remaining++)) || true
-    [[ -f "${TEST_DIR}/.git/hooks/pre-push" ]] && ((hooks_remaining++)) || true
+    local hook_name
+    for hook_name in pre-commit prepare-commit-msg commit-msg pre-push; do
+      if [[ -f "${TEST_DIR}/.git/hooks/${hook_name}" ]]; then
+        hooks_remaining=$((hooks_remaining + 1))
+      fi
+    done
 
     if [[ "${hooks_remaining}" -eq 0 ]]; then
       pass "uninstall.sh: all hooks removed"
