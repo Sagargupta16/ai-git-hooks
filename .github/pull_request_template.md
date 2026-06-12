@@ -43,7 +43,7 @@
 
 ## Checklist
 
-- [ ] My code follows the project's [style guide](CONTRIBUTING.md#style-guide)
+- [ ] My code follows the project's [style guide](../CONTRIBUTING.md#style-guide)
 - [ ] I have updated documentation for any changed behavior
 - [ ] I have added/updated the example config (`.ai-hooks.example.yml`) if I added new options
 - [ ] I have added tests for my changes
