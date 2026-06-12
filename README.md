@@ -1,9 +1,9 @@
 # AI Git Hooks
 
-![GitHub stars](https://img.shields.io/github/stars/Sagargupta16/ai-git-hooks?style=flat-square)
-![GitHub forks](https://img.shields.io/github/forks/Sagargupta16/ai-git-hooks?style=flat-square)
-![License](https://img.shields.io/github/license/Sagargupta16/ai-git-hooks?style=flat-square)
-![Last Commit](https://img.shields.io/github/last-commit/Sagargupta16/ai-git-hooks?style=flat-square)
+![GitHub stars](https://img.shields.io/github/stars/Sagargupta16/ai-git-hooks?style=flat-square&cacheSeconds=86400)
+![GitHub forks](https://img.shields.io/github/forks/Sagargupta16/ai-git-hooks?style=flat-square&cacheSeconds=86400)
+![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)
+![Last Commit](https://img.shields.io/github/last-commit/Sagargupta16/ai-git-hooks?style=flat-square&cacheSeconds=86400)
 
 > AI-powered git hooks that review your code, generate commit messages, catch bugs, and scan for security issues - before you push.
 
@@ -158,7 +158,7 @@ Push blocked due to critical finding.
 | Provider | Cost | Speed | Privacy | Setup |
 |----------|------|-------|---------|-------|
 | **Claude** (Anthropic) | API pricing | Fast | Cloud | API key |
-| **OpenAI** (GPT-4) | API pricing | Fast | Cloud | API key |
+| **OpenAI** | API pricing | Fast | Cloud | API key |
 | **Ollama** (local) | Free | Varies | Full privacy | Local install |
 
 ### Using Ollama (Free & Private)
