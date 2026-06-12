@@ -15,10 +15,10 @@
 provider: claude
 
 # Model to use (provider-specific).
-# Claude:  claude-sonnet-4-5-20250514, claude-haiku-35
+# Claude:  claude-sonnet-4-6, claude-haiku-4-5
 # OpenAI:  gpt-4o, gpt-4o-mini
 # Ollama:  llama3.1, codellama, mistral
-model: claude-sonnet-4-5-20250514
+model: claude-sonnet-4-6
 
 # Maximum tokens the AI can return in a single response.
 # Higher values allow more detailed reviews but cost more.

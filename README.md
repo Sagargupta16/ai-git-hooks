@@ -40,7 +40,7 @@ hooks:
   pre-commit:
     enabled: true
     severity: warn          # error | warn | info
-    max-files: 20
+    max_files: 20
     ignore:
       - "*.lock"
       - "*.min.js"
@@ -49,18 +49,18 @@ hooks:
   prepare-commit-msg:
     enabled: true
     style: conventional     # conventional | simple | detailed
-    prefix: true            # auto-detect ticket from branch name
+    ticket_prefix: true     # auto-detect ticket from branch name
 
   commit-msg:
     enabled: true
     convention: conventional
-    max-length: 72
+    max_length: 72
 
   pre-push:
     enabled: true
-    scan-secrets: true
-    scan-dependencies: true
-    max-file-size: 5MB
+    scan_secrets: true
+    scan_dependencies: true
+    max_file_size: 5MB
 ```
 
 ### 3. Set your API key
