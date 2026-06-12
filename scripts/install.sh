@@ -74,10 +74,16 @@ validate_source() {
   fi
 
   local hooks_found=0
-  [[ -f "${SOURCE_DIR}/hooks/pre-commit/ai-review.sh" ]] && ((hooks_found++)) || true
-  [[ -f "${SOURCE_DIR}/hooks/prepare-commit-msg/auto-message.sh" ]] && ((hooks_found++)) || true
-  [[ -f "${SOURCE_DIR}/hooks/commit-msg/validate.sh" ]] && ((hooks_found++)) || true
-  [[ -f "${SOURCE_DIR}/hooks/pre-push/security-scan.sh" ]] && ((hooks_found++)) || true
+  local hook_file
+  for hook_file in \
+    "pre-commit/ai-review.sh" \
+    "prepare-commit-msg/auto-message.sh" \
+    "commit-msg/validate.sh" \
+    "pre-push/security-scan.sh"; do
+    if [[ -f "${SOURCE_DIR}/hooks/${hook_file}" ]]; then
+      hooks_found=$((hooks_found + 1))
+    fi
+  done
 
   print_pass "Found ${hooks_found} hook(s) in ${SOURCE_DIR}/hooks/"
 }

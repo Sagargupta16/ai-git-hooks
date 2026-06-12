@@ -215,7 +215,8 @@ validate_conventional() {
 
   # Check that subject uses lowercase after the colon
   local after_colon
-  after_colon=$(echo "${subject}" | sed 's/^[^:]*: *//')
+  after_colon="${subject#*:}"
+  after_colon="${after_colon#"${after_colon%%[^ ]*}"}"
   if [[ -n "${after_colon}" ]] && [[ "${after_colon}" =~ ^[A-Z] ]]; then
     errors+=("Description after the colon should start with lowercase.")
   fi

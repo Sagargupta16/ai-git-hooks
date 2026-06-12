@@ -57,7 +57,6 @@ CONFIG_FILE="${REPO_ROOT}/.ai-hooks.yml"
 SCAN_SECRETS="true"
 SCAN_DEPS="true"
 MAX_FILE_SIZE="5242880"  # 5MB in bytes
-CUSTOM_PATTERNS=()
 IGNORE_PATTERNS=()
 DRY_RUN="${AI_HOOKS_DRY_RUN:-0}"
 
@@ -273,6 +272,9 @@ SECRET_SCAN_SKIP_FILES=(
 
 # --- Scanning Functions ---
 
+# Reserved: per-file skip-list filtering is not yet wired into the diff-wide
+# secret scan below, so ShellCheck sees this function as never invoked.
+# shellcheck disable=SC2317,SC2329
 should_skip_file() {
   local file="$1"
 
@@ -411,7 +413,7 @@ scan_dependencies() {
     print_debug "Running npm audit..."
 
     local npm_output
-    npm_output=$(cd "${REPO_ROOT}" && npm audit --json 2>/dev/null || true)
+    npm_output=$(cd "${REPO_ROOT}" && npm audit --json 2>/dev/null) || true
 
     if [[ -n "${npm_output}" ]]; then
       local critical_count high_count
@@ -442,7 +444,7 @@ scan_dependencies() {
       print_debug "Running pip-audit..."
 
       local pip_output
-      pip_output=$(cd "${REPO_ROOT}" && pip-audit --format=json 2>/dev/null || true)
+      pip_output=$(cd "${REPO_ROOT}" && pip-audit --format=json 2>/dev/null) || true
 
       if [[ -n "${pip_output}" ]]; then
         local vuln_count
