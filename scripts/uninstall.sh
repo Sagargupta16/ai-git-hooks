@@ -20,6 +20,7 @@ GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
+# shellcheck disable=SC2034  # part of the shared color palette
 DIM='\033[2m'
 RESET='\033[0m'
 
