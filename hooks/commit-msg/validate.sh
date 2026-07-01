@@ -45,7 +45,7 @@ print_warn()  { echo -e "${YELLOW}[WARN]${RESET} $1"; }
 print_error() { echo -e "${RED}[ERROR]${RESET} $1"; }
 print_info()  { echo -e "${CYAN}[INFO]${RESET} $1"; }
 print_debug() {
-  if [[ "${DEBUG:-0}" == "1" ]]; then
+  if [[ "${AI_HOOKS_DEBUG:-0}" == "1" ]]; then
     echo -e "${DIM}[DEBUG] $1${RESET}"
   fi
 }
