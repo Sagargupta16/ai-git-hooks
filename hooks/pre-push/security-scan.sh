@@ -45,7 +45,7 @@ print_error()    { echo -e "${RED}[ERROR]${RESET} $1"; }
 print_critical() { echo -e "${RED}${BOLD}[CRITICAL]${RESET} $1"; }
 print_info()     { echo -e "${CYAN}[INFO]${RESET} $1"; }
 print_debug() {
-  if [[ "${DEBUG:-0}" == "1" ]]; then
+  if [[ "${AI_HOOKS_DEBUG:-0}" == "1" ]]; then
     echo -e "${DIM}[DEBUG] $1${RESET}"
   fi
 }
@@ -143,6 +143,8 @@ load_config() {
   local val
 
   val=$(yaml_get "dry_run") && [[ "${val}" == "true" ]] && DRY_RUN="1"
+  # 'debug: true' in config enables the same verbose output as AI_HOOKS_DEBUG=1
+  val=$(yaml_get "debug") && [[ "${val}" == "true" ]] && export AI_HOOKS_DEBUG=1
 
   val=$(yaml_get "hooks.pre-push.enabled") && [[ "${val}" == "false" ]] && {
     print_debug "pre-push hook is disabled. Skipping."
@@ -194,14 +196,19 @@ declare -a SECRET_PATTERNS=(
   # SendGrid
   'SG\.[a-zA-Z0-9_-]{22}\.[a-zA-Z0-9_-]{43}'
 
-  # Generic patterns
-  'password\s*=\s*["\x27][^"\x27]{8,}["\x27]'
-  'secret\s*=\s*["\x27][^"\x27]{8,}["\x27]'
-  'api_key\s*=\s*["\x27][^"\x27]{8,}["\x27]'
-  'apikey\s*=\s*["\x27][^"\x27]{8,}["\x27]'
-  'access_token\s*=\s*["\x27][^"\x27]{8,}["\x27]'
-  'auth_token\s*=\s*["\x27][^"\x27]{8,}["\x27]'
-  'private_key\s*=\s*["\x27][^"\x27]{8,}["\x27]'
+  # Generic patterns.
+  # NOTE: "'\''" is the portable way to embed a literal single quote inside a
+  # single-quoted string. The regex must accept both " and ' as the quote
+  # char. A previous "\x27" is NOT an escape grep understands -- it landed in
+  # the class as the literal chars \ x 2 7, so single-quoted secrets were
+  # never matched at all.
+  'password\s*=\s*["'\''][^"'\'']{8,}["'\'']'
+  'secret\s*=\s*["'\''][^"'\'']{8,}["'\'']'
+  'api_key\s*=\s*["'\''][^"'\'']{8,}["'\'']'
+  'apikey\s*=\s*["'\''][^"'\'']{8,}["'\'']'
+  'access_token\s*=\s*["'\''][^"'\'']{8,}["'\'']'
+  'auth_token\s*=\s*["'\''][^"'\'']{8,}["'\'']'
+  'private_key\s*=\s*["'\''][^"'\'']{8,}["'\'']'
 
   # Private keys
   '-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'
@@ -336,9 +343,13 @@ scan_secrets_in_range() {
         local line_content
         line_content=$(echo "${match}" | sed 's/^[0-9]*://' | sed 's/^\+//')
 
-        # Mask the matched secret value
-        local masked
-        masked=$(echo "${line_content}" | sed -E "s/${pattern}/***REDACTED***/g" | head -c 120)
+        # Mask the matched secret value.
+        # Use a control-char delimiter: several patterns (connection strings)
+        # contain '/', which would break a "s/.../" sed command and, under
+        # 'set -e', abort the whole scan before the finding is even reported.
+        local masked sed_delim
+        sed_delim=$(printf '\001')
+        masked=$(echo "${line_content}" | sed -E "s${sed_delim}${pattern}${sed_delim}***REDACTED***${sed_delim}g" | head -c 120)
 
         print_critical "Possible ${name} found"
         echo -e "  ${DIM}${masked}${RESET}"
