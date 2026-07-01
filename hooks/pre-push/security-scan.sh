@@ -336,9 +336,13 @@ scan_secrets_in_range() {
         local line_content
         line_content=$(echo "${match}" | sed 's/^[0-9]*://' | sed 's/^\+//')
 
-        # Mask the matched secret value
-        local masked
-        masked=$(echo "${line_content}" | sed -E "s/${pattern}/***REDACTED***/g" | head -c 120)
+        # Mask the matched secret value.
+        # Use a control-char delimiter: several patterns (connection strings)
+        # contain '/', which would break a "s/.../" sed command and, under
+        # 'set -e', abort the whole scan before the finding is even reported.
+        local masked sed_delim
+        sed_delim=$(printf '\001')
+        masked=$(echo "${line_content}" | sed -E "s${sed_delim}${pattern}${sed_delim}***REDACTED***${sed_delim}g" | head -c 120)
 
         print_critical "Possible ${name} found"
         echo -e "  ${DIM}${masked}${RESET}"
