@@ -165,7 +165,8 @@ load_config() {
   val=$(yaml_get "max_tokens") && [[ -n "${val}" ]] && MAX_TOKENS="${val}"
   val=$(yaml_get "timeout") && [[ -n "${val}" ]] && TIMEOUT="${val}"
   val=$(yaml_get "dry_run") && [[ "${val}" == "true" ]] && DRY_RUN="1"
-  # debug flag is read from the AI_HOOKS_DEBUG env var at call sites, not stored here
+  # 'debug: true' in config enables the same verbose output as AI_HOOKS_DEBUG=1
+  val=$(yaml_get "debug") && [[ "${val}" == "true" ]] && export AI_HOOKS_DEBUG=1
 
   # Hook-specific settings
   val=$(yaml_get "hooks.pre-commit.enabled") && [[ "${val}" == "false" ]] && {

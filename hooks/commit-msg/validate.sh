@@ -133,6 +133,8 @@ load_config() {
   val=$(yaml_get "model") && [[ -n "${val}" ]] && MODEL="${val}"
   val=$(yaml_get "timeout") && [[ -n "${val}" ]] && TIMEOUT="${val}"
   val=$(yaml_get "dry_run") && [[ "${val}" == "true" ]] && DRY_RUN="1"
+  # 'debug: true' in config enables the same verbose output as AI_HOOKS_DEBUG=1
+  val=$(yaml_get "debug") && [[ "${val}" == "true" ]] && export AI_HOOKS_DEBUG=1
 
   # Hook-specific
   val=$(yaml_get "hooks.commit-msg.enabled") && [[ "${val}" == "false" ]] && {
