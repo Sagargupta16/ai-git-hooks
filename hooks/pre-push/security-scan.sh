@@ -196,14 +196,19 @@ declare -a SECRET_PATTERNS=(
   # SendGrid
   'SG\.[a-zA-Z0-9_-]{22}\.[a-zA-Z0-9_-]{43}'
 
-  # Generic patterns
-  'password\s*=\s*["\x27][^"\x27]{8,}["\x27]'
-  'secret\s*=\s*["\x27][^"\x27]{8,}["\x27]'
-  'api_key\s*=\s*["\x27][^"\x27]{8,}["\x27]'
-  'apikey\s*=\s*["\x27][^"\x27]{8,}["\x27]'
-  'access_token\s*=\s*["\x27][^"\x27]{8,}["\x27]'
-  'auth_token\s*=\s*["\x27][^"\x27]{8,}["\x27]'
-  'private_key\s*=\s*["\x27][^"\x27]{8,}["\x27]'
+  # Generic patterns.
+  # NOTE: "'\''" is the portable way to embed a literal single quote inside a
+  # single-quoted string. The regex must accept both " and ' as the quote
+  # char. A previous "\x27" is NOT an escape grep understands -- it landed in
+  # the class as the literal chars \ x 2 7, so single-quoted secrets were
+  # never matched at all.
+  'password\s*=\s*["'\''][^"'\'']{8,}["'\'']'
+  'secret\s*=\s*["'\''][^"'\'']{8,}["'\'']'
+  'api_key\s*=\s*["'\''][^"'\'']{8,}["'\'']'
+  'apikey\s*=\s*["'\''][^"'\'']{8,}["'\'']'
+  'access_token\s*=\s*["'\''][^"'\'']{8,}["'\'']'
+  'auth_token\s*=\s*["'\''][^"'\'']{8,}["'\'']'
+  'private_key\s*=\s*["'\''][^"'\'']{8,}["'\'']'
 
   # Private keys
   '-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'
