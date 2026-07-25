@@ -88,7 +88,7 @@ body:
       render: yaml
       placeholder: |
         provider: claude
-        model: claude-sonnet-4-6
+        model: claude-sonnet-5
         hooks:
           pre-commit:
             enabled: true
