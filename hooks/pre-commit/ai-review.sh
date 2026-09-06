@@ -212,6 +212,15 @@ filter_ignored_files() {
   local files="$1"
   local filtered=""
 
+  # Nothing to filter against, so return the list unchanged. This also avoids
+  # expanding an empty array below: bash 3.2 (macOS system bash) treats
+  # "${empty[@]}" as an unbound variable under 'set -u' and aborts the hook.
+  # IGNORE_PATTERNS is empty whenever the project has no .ai-hooks.yml.
+  if [[ "${#IGNORE_PATTERNS[@]}" -eq 0 ]]; then
+    echo "${files}"
+    return
+  fi
+
   while IFS= read -r file; do
     [[ -z "${file}" ]] && continue
     local ignored=0

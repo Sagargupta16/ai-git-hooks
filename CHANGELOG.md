@@ -6,6 +6,7 @@
 - Fix the two default-enabled message hooks rejecting each other: the validator now accepts the `PROJ-42: feat: ...` ticket prefix that the generator writes
 - Fix `hooks.pre-push.ignore` being read but never applied, so a false positive in a doc or fixture now has an escape hatch
 - Fix `hooks.commit-msg.allowed_types` being silently ignored (the config lookup matched the wrong hook block)
+- Fix the pre-commit hook aborting with "IGNORE_PATTERNS[@]: unbound variable" on bash 3.2 (macOS system bash) when the project has no `.ai-hooks.yml`
 - Read `ollama.host` from config instead of only the `OLLAMA_HOST` environment variable
 - Remove `custom_patterns` from the example config: it was documented but wired to nothing
 - Correct the README install steps, which installed the hooks into the ai-git-hooks clone rather than your project
