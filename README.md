@@ -22,12 +22,12 @@ Drop-in git hooks that use AI (Claude, OpenAI, Ollama) to automate code quality 
 
 | Requirement | Notes |
 |-------------|-------|
-| `git` 2.20+ | |
-| `bash` 4+ | macOS ships bash 3.2: `brew install bash` |
+| `git` | The hooks read the staged diff and the branch name |
+| `bash` | Every hook and script uses `#!/usr/bin/env bash`. CI runs the suite on ubuntu-latest and macos-latest |
 | `curl` | Used for every provider API call |
 | `jq` | Required. Hooks refuse to call a provider without it: `brew install jq` / `apt install jq` |
 
-Windows needs Git Bash or WSL. There is no npm package - install by cloning, as below.
+There is no npm package - install by cloning, as below.
 
 ## Quick Start
 
@@ -191,9 +191,14 @@ So a plain `git commit` with the shipped config makes two requests, and `git com
 makes one. Requests are serial and block the operation until they return or `timeout`
 (default 30 seconds) elapses. There is no caching, batching or retry.
 
-Knobs that reduce call volume: set `enabled: false` on any hook you do not want,
-lower `max_files` and `max_diff_lines`, widen `ignore`, or commit with `-m` to skip
-the message generator.
+Knobs that reduce the number of requests: set `enabled: false` on any hook you do
+not want, lower `max_files` so more commits skip the review, or commit with `-m` to
+skip the message generator.
+
+`max_diff_lines` and `hooks.pre-commit.ignore` do not change the request count.
+`max_diff_lines` truncates the payload, and `ignore` only decides whether the hook
+runs at all: once it does run, the request carries `git diff --cached` for every
+staged file, ignored ones included.
 
 ## Supported AI Providers
 
@@ -237,17 +242,19 @@ ran `install.sh` from inside the ai-git-hooks clone, you installed the hooks int
 clone - `cd` to your project and run it again with the clone path as the argument.
 
 **`./scripts/install.sh: Permission denied`.** The scripts ship with the executable
-bit set, but some transfer paths (zip download, a copy across filesystems) drop it.
-Run `chmod +x scripts/*.sh hooks/*/*.sh`, or invoke it as `bash scripts/install.sh`.
+bit set, so a `git clone` gives you a runnable copy. If your copy lost the bit, run
+`chmod +x scripts/*.sh hooks/*/*.sh`, or invoke it as `bash scripts/install.sh`.
 
 **`'jq' is required but not installed`.** Install it: `brew install jq` or
 `apt install jq`. Every provider call parses JSON with `jq`, so the pre-commit hook
 blocks the commit without it.
 
-**A secret scanner false positive is blocking my push.** Example keys in docs and
-test fixtures are common. Add the path to `hooks.pre-push.ignore` in `.ai-hooks.yml`
-(glob syntax, `*.md` and `test/**` are ignored by default). Binary and lockfile types
-are excluded by a built-in list already.
+**A secret scanner false positive is blocking my push.** Add the offending path to
+`hooks.pre-push.ignore` in `.ai-hooks.yml` (glob syntax). That list ships empty, so
+docs and test fixtures are scanned like everything else - they are common places for
+a real key to leak. Keep any pattern you add as narrow as the false positive, because
+listed files are not scanned at all. Binary, minified and lockfile types are skipped
+by a built-in list already.
 
 **Switching provider had no effect.** Edit the existing `provider:` and `model:` keys
 in `.ai-hooks.yml`. Appending a second `provider:` line does nothing - the config

@@ -52,12 +52,14 @@ shellcheck -x hooks/**/*.sh scripts/*.sh   # lint (CI-gated)
 
 - `AI_HOOKS_DRY_RUN=1` skips all provider API calls -- tests rely on it; keep the flag honored in every hook.
 - Scripts must pass `shellcheck -x` and stay executable with LF line endings (Windows dev machine; CI runs Linux/macOS only).
-- Provider auth is env-var based (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OLLAMA_HOST`) -- never write keys into config files or examples.
-- Adding a hook or script means updating three places: the CI shellcheck list, `scripts/test.sh`, and the README hooks table.
+- Provider auth is env-var only (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) -- never write keys into config files or examples. The Ollama host is not auth: it reads from `ollama.host` in config, with `OLLAMA_HOST` taking precedence.
+- Adding a hook or script means updating two places: `scripts/test.sh` and the README hooks table. CI discovers `hooks/**/*.sh` and `scripts/*.sh` by file scan for both the shellcheck lint and the executable-bit assertion.
+- `hooks.pre-push.ignore` ships empty on purpose. Anything listed there is dropped from the secret scan, so a default entry would silently shrink coverage for every user.
 
 ## Install              (CLI / tool)
 
-- `git clone ... && ./scripts/install.sh` from inside the repo, or `/path/to/ai-git-hooks/scripts/install.sh /path/to/ai-git-hooks` from a target project
+- Clone somewhere permanent, then from the target project root: `/path/to/ai-git-hooks/scripts/install.sh /path/to/ai-git-hooks`
+- `install.sh` sets `TARGET_DIR="$(pwd)"`, so running it from inside the ai-git-hooks clone installs the hooks into the clone and leaves the user's project untouched
 
 ## Usage                (CLI / tool)
 

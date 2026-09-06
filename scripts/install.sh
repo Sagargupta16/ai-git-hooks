@@ -9,11 +9,13 @@ set -euo pipefail
 # Usage:
 #   ./scripts/install.sh [path-to-ai-git-hooks]
 #
-# If run from within the ai-git-hooks repo:
-#   ./scripts/install.sh
-#
-# If run from a target project directory:
+# Hooks are installed into the .git/hooks/ of the CURRENT directory, so run this
+# from the project you want the hooks in:
+#   cd /path/to/your-project
 #   /path/to/ai-git-hooks/scripts/install.sh /path/to/ai-git-hooks
+#
+# Running it as ./scripts/install.sh from inside the ai-git-hooks clone is
+# valid, but it installs the hooks into the clone, not into your project.
 #
 # What it does:
 #   1. Copies hook scripts to .git/hooks/

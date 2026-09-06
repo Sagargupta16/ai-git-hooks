@@ -34,14 +34,15 @@ This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.
 
 ### Prerequisites
 
-- **Bash** 4.0+ (macOS users: `brew install bash`)
-- **Git** 2.20+
+- **Bash** (CI runs the suite on ubuntu-latest and macos-latest)
+- **Git**
 - **curl** (for API calls)
 - **jq** (for JSON parsing): `brew install jq` / `apt install jq`
 - **shellcheck** (CI gates on it): `brew install shellcheck` / `apt install shellcheck`
 
-There is no Node.js or npm step. `package.json` is metadata only - it declares no
-dependencies, and `scripts/test.sh` is pure bash.
+There is no dependency install step. `package.json` declares no dependencies, its
+`scripts` entries are aliases for the shell scripts, and `scripts/test.sh` is pure
+bash.
 
 ### Optional
 
