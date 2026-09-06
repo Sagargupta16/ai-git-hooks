@@ -18,19 +18,41 @@ Drop-in git hooks that use AI (Claude, OpenAI, Ollama) to automate code quality 
 | [Commit Message Validator](hooks/commit-msg/) | Validates commit messages follow conventions | `commit-msg` |
 | [Pre-Push Security Scan](hooks/pre-push/) | Scans for secrets, vulnerabilities, and large files | `pre-push` |
 
+## Requirements
+
+| Requirement | Notes |
+|-------------|-------|
+| `git` 2.20+ | |
+| `bash` 4+ | macOS ships bash 3.2: `brew install bash` |
+| `curl` | Used for every provider API call |
+| `jq` | Required. Hooks refuse to call a provider without it: `brew install jq` / `apt install jq` |
+
+Windows needs Git Bash or WSL. There is no npm package - install by cloning, as below.
+
 ## Quick Start
 
-### 1. Install
+### 1. Clone this repo
+
+Clone it somewhere permanent. This directory is the source of the hooks, not the
+project they run in.
 
 ```bash
-git clone https://github.com/Sagargupta16/ai-git-hooks.git
-cd ai-git-hooks
-./scripts/install.sh
+git clone https://github.com/Sagargupta16/ai-git-hooks.git ~/tools/ai-git-hooks
 ```
 
-### 2. Configure
+### 2. Install into your project
 
-Create `.ai-hooks.yml` in your project root:
+```bash
+cd /path/to/your-project
+~/tools/ai-git-hooks/scripts/install.sh ~/tools/ai-git-hooks
+```
+
+The installer copies the four hooks into `your-project/.git/hooks/` and creates
+`your-project/.ai-hooks.yml`. Run it once per project you want the hooks in.
+
+### 3. Configure
+
+The installer seeds `.ai-hooks.yml` in your project root. The keys that matter:
 
 ```yaml
 provider: claude            # claude | openai | ollama
@@ -63,7 +85,7 @@ hooks:
     max_file_size: 5MB
 ```
 
-### 3. Set your API key
+### 4. Set your API key
 
 ```bash
 # Claude (recommended)
@@ -153,6 +175,26 @@ Scan complete: 1 critical, 1 warning
 Push blocked due to critical finding.
 ```
 
+## What Runs On Every Commit
+
+These hooks call your provider on ordinary git operations, so it is worth knowing
+the request pattern before you install them.
+
+| Hook | Provider requests | Notes |
+|------|-------------------|-------|
+| `pre-commit` | 1 per commit | Sends the staged diff, truncated to `max_diff_lines` (default 500). Skipped entirely when more than `max_files` (default 20) files are staged, or when every staged file matches `ignore`. |
+| `prepare-commit-msg` | 1 per commit | A second request with the staged diff, truncated to 500 lines. Skipped for `git commit -m`, merges and squashes. |
+| `commit-msg` | 0, or 1 on failure | Only asks for a suggestion when validation fails and `suggest_fix: true`. |
+| `pre-push` | 0 | Regex secret scan, file-size check and `npm audit` / `pip-audit`. No AI involved. |
+
+So a plain `git commit` with the shipped config makes two requests, and `git commit -m`
+makes one. Requests are serial and block the operation until they return or `timeout`
+(default 30 seconds) elapses. There is no caching, batching or retry.
+
+Knobs that reduce call volume: set `enabled: false` on any hook you do not want,
+lower `max_files` and `max_diff_lines`, widen `ignore`, or commit with `-m` to skip
+the message generator.
+
 ## Supported AI Providers
 
 | Provider | Cost | Speed | Privacy | Setup |
@@ -165,9 +207,18 @@ Push blocked due to critical finding.
 
 ```bash
 ollama pull llama3.1
-echo 'provider: ollama' >> .ai-hooks.yml
-echo 'model: llama3.1' >> .ai-hooks.yml
 ```
+
+Then edit the existing `provider` and `model` keys in `.ai-hooks.yml`:
+
+```yaml
+provider: ollama
+model: llama3.1
+```
+
+Edit them in place - do not append duplicate keys to the end of the file. The
+config reader takes the first match for a top-level key, so an appended
+`provider:` is ignored and the original value keeps winning.
 
 ## Scripts
 
@@ -176,6 +227,38 @@ echo 'model: llama3.1' >> .ai-hooks.yml
 | [`install.sh`](scripts/install.sh) | Install hooks to your git project |
 | [`uninstall.sh`](scripts/uninstall.sh) | Remove hooks from your project |
 | [`test.sh`](scripts/test.sh) | Test hooks against sample diffs |
+
+## Troubleshooting
+
+**Nothing happens when I commit.** The hooks live in the target project's
+`.git/hooks/`, not in the ai-git-hooks clone. Check that
+`ls -l /path/to/your-project/.git/hooks/pre-commit` exists and is executable. If you
+ran `install.sh` from inside the ai-git-hooks clone, you installed the hooks into the
+clone - `cd` to your project and run it again with the clone path as the argument.
+
+**`./scripts/install.sh: Permission denied`.** The scripts ship with the executable
+bit set, but some transfer paths (zip download, a copy across filesystems) drop it.
+Run `chmod +x scripts/*.sh hooks/*/*.sh`, or invoke it as `bash scripts/install.sh`.
+
+**`'jq' is required but not installed`.** Install it: `brew install jq` or
+`apt install jq`. Every provider call parses JSON with `jq`, so the pre-commit hook
+blocks the commit without it.
+
+**A secret scanner false positive is blocking my push.** Example keys in docs and
+test fixtures are common. Add the path to `hooks.pre-push.ignore` in `.ai-hooks.yml`
+(glob syntax, `*.md` and `test/**` are ignored by default). Binary and lockfile types
+are excluded by a built-in list already.
+
+**Switching provider had no effect.** Edit the existing `provider:` and `model:` keys
+in `.ai-hooks.yml`. Appending a second `provider:` line does nothing - the config
+reader takes the first match. Run with `AI_HOOKS_DEBUG=1` to print the provider and
+model actually in use.
+
+**I need to commit right now.** `git commit --no-verify` and `git push --no-verify`
+bypass the hooks for one operation. To turn a single hook off for good, set
+`enabled: false` on it in `.ai-hooks.yml`. To remove everything, run
+`/path/to/ai-git-hooks/scripts/uninstall.sh` from your project root - it restores any
+hook it backed up during install.
 
 ## Contributing
 
@@ -193,8 +276,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
 | Project | Description |
 |---------|-------------|
 | [claude-cost-optimizer](https://github.com/Sagargupta16/claude-cost-optimizer) | Save 30-60% on Claude Code costs - proven strategies and benchmarks |
-| [claude-code-recipes](https://github.com/Sagargupta16/claude-code-recipes) | 50+ copy-paste recipes for Claude Code - commands, subagents, hooks, skills |
-| [mcp-toolkit](https://github.com/Sagargupta16/mcp-toolkit) | Production-ready middleware for MCP servers - auth, caching, rate limiting |
+| [claude-code-recipes](https://github.com/Sagargupta16/claude-code-recipes) | 47 copy-paste recipes for Claude Code - commands, subagents, hooks, skills, MCP integration |
+| [mcp-toolkit](https://github.com/Sagargupta16/mcp-toolkit) | TypeScript middleware toolkit for MCP servers - auth, caching, rate limiting (beta) |
 | [agent-recipes](https://github.com/Sagargupta16/agent-recipes) | AI agent workflows for real-world dev tasks - code review, testing, security |
 
 ## License

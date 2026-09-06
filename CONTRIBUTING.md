@@ -38,7 +38,10 @@ This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.
 - **Git** 2.20+
 - **curl** (for API calls)
 - **jq** (for JSON parsing): `brew install jq` / `apt install jq`
-- **Node.js** 18+ (for package tooling and tests)
+- **shellcheck** (CI gates on it): `brew install shellcheck` / `apt install shellcheck`
+
+There is no Node.js or npm step. `package.json` is metadata only - it declares no
+dependencies, and `scripts/test.sh` is pure bash.
 
 ### Optional
 
@@ -47,7 +50,6 @@ This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.
 ### Setup
 
 ```bash
-npm install
 cp .ai-hooks.example.yml .ai-hooks.yml
 # Edit .ai-hooks.yml with your provider/key
 ```
