@@ -15,10 +15,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install ShellCheck
-        run: sudo apt-get install -y shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
 
       - name: Lint hook scripts
         run: |
@@ -40,7 +40,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install dependencies
         run: |
@@ -50,15 +50,21 @@ jobs:
             brew install jq
           fi
 
-      - name: Verify scripts are executable
+      # No chmod here on purpose. The scripts are committed with mode 100755,
+      # and this step is what proves a fresh clone can execute them. Adding a
+      # chmod back would hide a broken shipped file mode from CI.
+      - name: Verify shipped scripts are executable
         run: |
-          chmod +x hooks/pre-commit/ai-review.sh
-          chmod +x hooks/prepare-commit-msg/auto-message.sh
-          chmod +x hooks/commit-msg/validate.sh
-          chmod +x hooks/pre-push/security-scan.sh
-          chmod +x scripts/install.sh
-          chmod +x scripts/uninstall.sh
-          chmod +x scripts/test.sh
+          for f in hooks/pre-commit/ai-review.sh \
+                   hooks/prepare-commit-msg/auto-message.sh \
+                   hooks/commit-msg/validate.sh \
+                   hooks/pre-push/security-scan.sh \
+                   scripts/install.sh \
+                   scripts/uninstall.sh \
+                   scripts/test.sh; do
+            test -x "$f" || { echo "Not executable in a fresh clone: $f"; exit 1; }
+          done
+          echo "All 7 scripts are executable as checked out"
 
       - name: Run tests (dry-run mode)
         env:
@@ -70,7 +76,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
@@ -83,9 +89,8 @@ jobs:
           git config user.email "test@example.com"
           git config user.name "Test User"
 
-      - name: Make scripts executable
-        run: chmod +x scripts/*.sh hooks/**/*.sh
-
+      # Invoked directly, with no chmod first, so this exercises the file mode
+      # a user actually gets from `git clone`.
       - name: Run install script
         run: |
           cd /tmp/test-project

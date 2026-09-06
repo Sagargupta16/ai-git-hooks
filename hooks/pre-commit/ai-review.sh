@@ -81,7 +81,9 @@ MAX_DIFF_LINES="500"
 CUSTOM_PROMPT=""
 IGNORE_PATTERNS=()
 DRY_RUN="${AI_HOOKS_DRY_RUN:-0}"
-# NOTE: no local DEBUG var — debug output uses AI_HOOKS_DEBUG env directly
+# Ollama host from config. The OLLAMA_HOST env var takes precedence over it.
+OLLAMA_CONFIG_HOST=""
+# NOTE: no local DEBUG var -- debug output uses AI_HOOKS_DEBUG env directly
 # (see print_debug). Keeps shellcheck SC2034 happy without suppressions.
 
 # Simple YAML value reader: reads a top-level or nested key from the config.
@@ -167,6 +169,7 @@ load_config() {
   val=$(yaml_get "dry_run") && [[ "${val}" == "true" ]] && DRY_RUN="1"
   # 'debug: true' in config enables the same verbose output as AI_HOOKS_DEBUG=1
   val=$(yaml_get "debug") && [[ "${val}" == "true" ]] && export AI_HOOKS_DEBUG=1
+  val=$(yaml_get "ollama.host") && [[ -n "${val}" ]] && OLLAMA_CONFIG_HOST="${val}"
 
   # Hook-specific settings
   val=$(yaml_get "hooks.pre-commit.enabled") && [[ "${val}" == "false" ]] && {
@@ -364,7 +367,8 @@ ${diff_content}"
 
 call_ollama() {
   local diff_content="$1"
-  local host="${OLLAMA_HOST:-http://localhost:11434}"
+  # Precedence: OLLAMA_HOST env > ollama.host in config > localhost default.
+  local host="${OLLAMA_HOST:-${OLLAMA_CONFIG_HOST:-http://localhost:11434}}"
 
   local prompt
   prompt="You are a senior code reviewer. Review the following git diff for:

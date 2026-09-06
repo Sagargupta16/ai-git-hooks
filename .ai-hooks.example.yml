@@ -30,6 +30,7 @@ timeout: 30
 # --- Ollama-specific settings ---
 ollama:
   # Host URL for the Ollama server.
+  # The OLLAMA_HOST environment variable overrides this if both are set.
   host: "http://localhost:11434"
 
 # ============================================================================
@@ -159,15 +160,9 @@ hooks:
     # Supports: B, KB, MB, GB suffixes.
     max_file_size: "5MB"
 
-    # Additional regex patterns to scan for secrets.
-    # These are added on top of the built-in patterns.
-    custom_patterns: []
-    #   - name: "Internal API Token"
-    #     pattern: "internal_token_[a-zA-Z0-9]{32}"
-    #   - name: "Custom Secret"
-    #     pattern: "MY_SECRET=['\"][^'\"]+['\"]"
-
     # File patterns to exclude from secret scanning (glob syntax).
+    # Use this for docs and fixtures that legitimately contain example keys.
+    # Binary and lockfile types are excluded by a built-in list as well.
     ignore:
       - "*.lock"
       - "*.md"
@@ -184,6 +179,9 @@ hooks:
 
 # Set to true to skip all AI API calls and use mock responses.
 # Useful for testing hook logic without burning API credits.
+# The pre-push hook makes no AI calls, so for that hook dry_run only skips the
+# dependency audit -- secret and large-file scanning still run and can still
+# block the push.
 dry_run: false
 
 # Enable verbose/debug output. Shows API requests and responses.

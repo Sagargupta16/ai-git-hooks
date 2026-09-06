@@ -17,7 +17,10 @@ set -euo pipefail
 #   1 - Critical issues found (push blocked)
 #
 # Environment:
-#   AI_HOOKS_DRY_RUN  - Set to "1" to skip actual scanning
+#   AI_HOOKS_DRY_RUN  - Set to "1" to skip the dependency audit only. Secret
+#                       and large-file scanning still run, and a secret finding
+#                       still blocks the push. This hook makes no AI API calls,
+#                       so there is nothing else for dry-run to stub out.
 #   AI_HOOKS_DEBUG     - Set to "1" for verbose output
 # ============================================================================
 
@@ -101,6 +104,20 @@ yaml_get() {
   fi
 }
 
+# Read list values (lines starting with "- ") from a key inside the pre-push
+# block. The outer range is anchored to '^  pre-push:' so it cannot match a
+# different hook block.
+yaml_get_list() {
+  local section_key="$1"
+  local file="${CONFIG_FILE}"
+
+  [[ ! -f "${file}" ]] && return 1
+
+  local block
+  block=$(sed -n '/^  pre-push:/,/^[^ ]/p' "${file}" | sed -n "/^    ${section_key}:/,/^    [a-z]/p")
+  echo "${block}" | grep '^ *- ' | sed 's/^ *- *//' | sed 's/"//g' | sed "s/'//g"
+}
+
 # Convert size strings (5MB, 500KB, etc.) to bytes
 parse_size() {
   local size_str="${1:-5MB}"
@@ -154,6 +171,17 @@ load_config() {
   val=$(yaml_get "hooks.pre-push.scan_dependencies") && [[ -n "${val}" ]] && SCAN_DEPS="${val}"
 
   val=$(yaml_get "hooks.pre-push.max_file_size") && [[ -n "${val}" ]] && MAX_FILE_SIZE=$(parse_size "${val}")
+
+  # Load the per-file exclusion list. Without this the documented
+  # hooks.pre-push.ignore key was never read, so a false positive in a doc or
+  # fixture file had no escape hatch short of --no-verify.
+  local patterns
+  patterns=$(yaml_get_list "ignore" 2>/dev/null || true)
+  if [[ -n "${patterns}" ]]; then
+    while IFS= read -r pattern; do
+      [[ -n "${pattern}" ]] && IGNORE_PATTERNS+=("${pattern}")
+    done <<< "${patterns}"
+  fi
 }
 
 # --- Secret Patterns ---
@@ -279,9 +307,8 @@ SECRET_SCAN_SKIP_FILES=(
 
 # --- Scanning Functions ---
 
-# Reserved: per-file skip-list filtering is not yet wired into the diff-wide
-# secret scan below, so ShellCheck sees this function as never invoked.
-# shellcheck disable=SC2317,SC2329
+# True when a file should be excluded from the secret scan, either by the
+# built-in binary/lockfile skip list or by hooks.pre-push.ignore in the config.
 should_skip_file() {
   local file="$1"
 
@@ -292,12 +319,16 @@ should_skip_file() {
     esac
   done
 
-  for pattern in "${IGNORE_PATTERNS[@]}"; do
-    # shellcheck disable=SC2254
-    case "${file}" in
-      ${pattern}) return 0 ;;
-    esac
-  done
+  # Guard the expansion: IGNORE_PATTERNS is empty when no config file exists,
+  # and bash 3.2 (macOS system bash) treats "${empty[@]}" as unbound under -u.
+  if [[ "${#IGNORE_PATTERNS[@]}" -gt 0 ]]; then
+    for pattern in "${IGNORE_PATTERNS[@]}"; do
+      # shellcheck disable=SC2254
+      case "${file}" in
+        ${pattern}) return 0 ;;
+      esac
+    done
+  fi
 
   return 1
 }
@@ -312,18 +343,41 @@ scan_secrets_in_range() {
 
   print_info "Scanning for secrets..."
 
-  # Get the diff for the commit range
+  # Build the list of files to scan, dropping anything on the skip list or the
+  # configured ignore list, then diff only those paths. Filtering the file list
+  # (rather than the assembled diff text) is what makes the documented
+  # hooks.pre-push.ignore key take effect.
+  local files
+  files=$(git diff --name-only "${range}" 2>/dev/null || true)
+
+  if [[ -z "${files}" ]]; then
+    print_debug "No changed files to scan."
+    return
+  fi
+
+  local scan_paths=()
+  local file
+  while IFS= read -r file; do
+    [[ -z "${file}" ]] && continue
+    if should_skip_file "${file}"; then
+      print_debug "Skipping (ignored): ${file}"
+      continue
+    fi
+    scan_paths+=("${file}")
+  done <<< "${files}"
+
+  if [[ "${#scan_paths[@]}" -eq 0 ]]; then
+    print_pass "No secrets detected (all changed files are on the ignore list)."
+    return
+  fi
+
   local diff_content
-  diff_content=$(git diff "${range}" 2>/dev/null || true)
+  diff_content=$(git diff "${range}" -- "${scan_paths[@]}" 2>/dev/null || true)
 
   if [[ -z "${diff_content}" ]]; then
     print_debug "No diff content to scan."
     return
   fi
-
-  # Get list of added/modified files
-  local files
-  files=$(git diff --name-only "${range}" 2>/dev/null || true)
 
   local found_secrets=0
 
@@ -486,7 +540,8 @@ main() {
   load_config
 
   if [[ "${DRY_RUN}" == "1" ]]; then
-    print_info "Dry-run mode: Performing limited scan."
+    print_info "Dry-run mode: skipping the dependency audit."
+    print_info "Secret and large-file scanning still run and can still block."
   fi
 
   # Read push information from stdin
