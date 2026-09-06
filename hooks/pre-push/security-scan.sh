@@ -105,8 +105,11 @@ yaml_get() {
 }
 
 # Read list values (lines starting with "- ") from a key inside the pre-push
-# block. The outer range is anchored to '^  pre-push:' so it cannot match a
-# different hook block.
+# block. Both ends of the outer range matter: '^  pre-push:' anchors the start
+# so a longer key cannot match first, and '^  [a-z]' ends it at the NEXT hook
+# block. Ending at '^[^ ]' instead only stopped at a top-level key, so the
+# range ran past '  pre-commit:' and this function returned that block's
+# ignore list -- a pre-commit ignore silently disabled the secret scan.
 yaml_get_list() {
   local section_key="$1"
   local file="${CONFIG_FILE}"
@@ -114,7 +117,7 @@ yaml_get_list() {
   [[ ! -f "${file}" ]] && return 1
 
   local block
-  block=$(sed -n '/^  pre-push:/,/^[^ ]/p' "${file}" | sed -n "/^    ${section_key}:/,/^    [a-z]/p")
+  block=$(sed -n '/^  pre-push:/,/^  [a-z]/p' "${file}" | sed -n "/^    ${section_key}:/,/^    [a-z]/p")
   echo "${block}" | grep '^ *- ' | sed 's/^ *- *//' | sed 's/"//g' | sed "s/'//g"
 }
 

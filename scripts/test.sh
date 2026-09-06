@@ -611,6 +611,37 @@ test_pre_push() {
   fi
   cleanup_test_repo
 
+  # Test: an ignore list belonging to a DIFFERENT hook block must not leak into
+  # pre-push. yaml_get_list once ended its outer sed range at '^[^ ]', which
+  # only stops at a top-level key, so the range ran past '  pre-commit:' and
+  # pre-push inherited that block's ignore list. With pre-push listed first and
+  # carrying no ignore of its own, a pre-commit 'ignore: ["*.md"]' silently
+  # turned off secret scanning for the whole push.
+  setup_test_repo
+  cat > .ai-hooks.yml <<'PROBE_EOF'
+provider: claude
+hooks:
+  pre-push:
+    enabled: true
+    scan_secrets: true
+    max_file_size: 5MB
+  pre-commit:
+    enabled: true
+    ignore:
+      - "*.md"
+PROBE_EOF
+  ref_line=$(commit_and_ref_line "notes.md" "Example: AWS_ACCESS_KEY_ID = $(fake_aws_key)")
+  if output=$(echo "${ref_line}" | bash "${hook}" 2>&1); then
+    fail "Cross-block ignore: a pre-commit ignore list must not disable the pre-push scan" "$(echo "${output}" | tail -3)"
+  else
+    if echo "${output}" | grep -q "CRITICAL"; then
+      pass "Cross-block ignore: pre-push ignores only its own block"
+    else
+      fail "Cross-block ignore: exited non-zero but reported no CRITICAL finding" "$(echo "${output}" | tail -3)"
+    fi
+  fi
+  cleanup_test_repo
+
   # Test: a secret in a file matching an opted-in hooks.pre-push.ignore pattern
   # does NOT block. This is the only escape hatch from a false positive in docs
   # or fixtures, so it has to actually work. The pattern comes from the test,
