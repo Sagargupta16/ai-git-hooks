@@ -71,6 +71,8 @@ MAX_LENGTH="72"
 ALLOWED_TYPES="feat fix docs style refactor perf test build ci chore revert"
 SUGGEST_FIX="true"
 DRY_RUN="${AI_HOOKS_DRY_RUN:-0}"
+# Ollama host from config. The OLLAMA_HOST env var takes precedence over it.
+OLLAMA_CONFIG_HOST=""
 
 yaml_get() {
   local key="$1"
@@ -116,8 +118,11 @@ yaml_get_list() {
 
   [[ ! -f "${file}" ]] && return 1
 
+  # The outer range must be anchored to '^  commit-msg:'. An unanchored
+  # /commit-msg:/ matches '  prepare-commit-msg:' first, so the range covered
+  # the wrong hook block and allowed_types was always silently empty.
   local block
-  block=$(sed -n '/commit-msg:/,/^  [a-z]/p' "${file}" | sed -n "/    ${section_key}:/,/^    [a-z]/p")
+  block=$(sed -n '/^  commit-msg:/,/^  [a-z]/p' "${file}" | sed -n "/    ${section_key}:/,/^    [a-z]/p")
   echo "${block}" | grep '^ *- ' | sed 's/^ *- *//' | sed 's/"//g' | sed "s/'//g"
 }
 
@@ -135,6 +140,7 @@ load_config() {
   val=$(yaml_get "dry_run") && [[ "${val}" == "true" ]] && DRY_RUN="1"
   # 'debug: true' in config enables the same verbose output as AI_HOOKS_DEBUG=1
   val=$(yaml_get "debug") && [[ "${val}" == "true" ]] && export AI_HOOKS_DEBUG=1
+  val=$(yaml_get "ollama.host") && [[ -n "${val}" ]] && OLLAMA_CONFIG_HOST="${val}"
 
   # Hook-specific
   val=$(yaml_get "hooks.commit-msg.enabled") && [[ "${val}" == "false" ]] && {
@@ -184,12 +190,33 @@ validate_conventional() {
     return 1
   fi
 
+  # An optional ticket prefix is allowed before the conventional part, because
+  # prepare-commit-msg writes one when hooks.prepare-commit-msg.ticket_prefix
+  # is true:
+  #   "PROJ-42: feat(auth): add login functionality"
+  # Without this the two default-enabled hooks reject each other's output and
+  # committing on a Jira/Linear branch is impossible without --no-verify.
+  # The prefix alternatives mirror detect_ticket() in auto-message.sh. Kept in
+  # one variable so the format check and the description checks below cannot
+  # drift apart.
+  local ticket_re="([A-Z][A-Z0-9]+-[0-9]+|#[0-9]+): "
+
+  # The conventional part of the subject, with any ticket prefix removed. Every
+  # rule below that talks about the type or the description works on this, not
+  # on the raw subject: "${subject#*:}" would cut at the ticket's colon and let
+  # a prefixed message skip a rule an unprefixed one has to obey.
+  local cc_subject="${subject}"
+  local strip_re="^${ticket_re}(.*)$"
+  if [[ "${cc_subject}" =~ ${strip_re} ]]; then
+    cc_subject="${BASH_REMATCH[2]}"
+  fi
+
   # Check conventional commit format: type(scope): description  or  type: description
   local cc_regex="^([a-z]+)(\([a-z0-9._-]+\))?!?: .+"
-  if ! [[ "${subject}" =~ ${cc_regex} ]]; then
+  if ! [[ "${cc_subject}" =~ ${cc_regex} ]]; then
     errors+=("Subject does not match conventional commit format: type(scope): description")
   else
-    # Check that the type is allowed
+    # Check that the type is allowed.
     local msg_type="${BASH_REMATCH[1]}"
     local type_valid=0
     for allowed in ${ALLOWED_TYPES}; do
@@ -215,9 +242,9 @@ validate_conventional() {
     errors+=("Subject line should not end with a period.")
   fi
 
-  # Check that subject uses lowercase after the colon
+  # Check that the description uses lowercase after the colon
   local after_colon
-  after_colon="${subject#*:}"
+  after_colon="${cc_subject#*:}"
   after_colon="${after_colon#"${after_colon%%[^ ]*}"}"
   if [[ -n "${after_colon}" ]] && [[ "${after_colon}" =~ ^[A-Z] ]]; then
     errors+=("Description after the colon should start with lowercase.")
@@ -346,7 +373,8 @@ Respond with ONLY the corrected commit message. No explanations, no quotes, no m
       echo "${response}" | jq -r '.choices[0].message.content // empty' 2>/dev/null
       ;;
     ollama)
-      local host="${OLLAMA_HOST:-http://localhost:11434}"
+      # Precedence: OLLAMA_HOST env > ollama.host in config > localhost default.
+      local host="${OLLAMA_HOST:-${OLLAMA_CONFIG_HOST:-http://localhost:11434}}"
 
       local payload
       payload=$(jq -n \

@@ -26,28 +26,10 @@
     "pre-commit",
     "devtools"
   ],
-  "bin": {
-    "ai-git-hooks": "./scripts/install.sh"
-  },
   "scripts": {
     "install-hooks": "./scripts/install.sh",
     "uninstall-hooks": "./scripts/uninstall.sh",
     "test": "./scripts/test.sh",
     "lint": "shellcheck hooks/**/*.sh scripts/*.sh"
-  },
-  "files": [
-    "hooks/",
-    "scripts/",
-    ".ai-hooks.example.yml",
-    "LICENSE",
-    "README.md"
-  ],
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "os": [
-    "darwin",
-    "linux",
-    "win32"
-  ]
+  }
 }

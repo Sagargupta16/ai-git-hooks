@@ -76,7 +76,12 @@ fail() {
 
 # --- Test Helpers ---
 
+# Usage: setup_test_repo [no-config]
+# Pass "no-config" to leave .ai-hooks.yml out, which exercises each hook's
+# built-in defaults path instead of the example config.
 setup_test_repo() {
+  local config_mode="${1:-with-config}"
+
   TEST_DIR=$(mktemp -d 2>/dev/null || mktemp -d -t 'ai-hooks-test')
   cd "${TEST_DIR}"
   git init --quiet
@@ -84,7 +89,7 @@ setup_test_repo() {
   git config user.name "Test User"
 
   # Copy example config
-  if [[ -f "${REPO_ROOT}/.ai-hooks.example.yml" ]]; then
+  if [[ "${config_mode}" != "no-config" ]] && [[ -f "${REPO_ROOT}/.ai-hooks.example.yml" ]]; then
     cp "${REPO_ROOT}/.ai-hooks.example.yml" ".ai-hooks.yml"
   fi
 
@@ -107,6 +112,89 @@ stage_file() {
   local content="${2:-test content}"
   echo "${content}" > "${filename}"
   git add "${filename}"
+}
+
+# Commit a file, then echo the stdin line git would hand the pre-push hook:
+#   <local ref> <local sha> <remote ref> <remote sha>
+# The remote sha is the commit before this one, so the hook scans exactly the
+# new commit.
+commit_and_ref_line() {
+  local filename="$1"
+  local content="$2"
+
+  local base ref
+  base=$(git rev-parse HEAD)
+  ref="refs/heads/$(git rev-parse --abbrev-ref HEAD)"
+
+  printf '%s\n' "${content}" > "${filename}"
+  git add "${filename}"
+  git commit --quiet -m "test: add ${filename}"
+
+  echo "${ref} $(git rev-parse HEAD) ${ref} ${base}"
+}
+
+# Usage: set_pre_push_ignore <glob> [<glob> ...]
+# Replaces the empty `ignore: []` default under hooks.pre-push with the given
+# globs. The ignore-list tests supply their own patterns through this helper so
+# they assert the mechanism rather than whatever .ai-hooks.example.yml happens
+# to ship. Tightening or widening the shipped default cannot break them.
+# Done in pure bash on purpose: passing the multi-line replacement through
+# `awk -v` fails on the macOS awk with "newline in string".
+set_pre_push_ignore() {
+  local rewritten=""
+  local line pattern
+
+  while IFS= read -r line; do
+    if [[ "${line}" == "    ignore: []" ]]; then
+      rewritten="${rewritten}    ignore:"$'\n'
+      for pattern in "$@"; do
+        rewritten="${rewritten}      - \"${pattern}\""$'\n'
+      done
+    else
+      rewritten="${rewritten}${line}"$'\n'
+    fi
+  done < .ai-hooks.yml
+
+  printf '%s' "${rewritten}" > .ai-hooks.yml
+}
+
+# Usage: set_hook_max_length <hook-block> <value>
+# Rewrites max_length inside one hook block of the test repo's config.
+# `max_length` appears under two blocks, so the rewrite has to be scoped.
+# Pure bash, like set_pre_push_ignore above, to keep awk out of the harness.
+set_hook_max_length() {
+  local block="  $1:"
+  local value="$2"
+
+  local rewritten=""
+  local line
+  local in_block=0
+  # Any other two-space hook header ends the block. Held in a variable because
+  # bash 3.2 and bash 4 disagree about quoting on the right of =~.
+  local block_header_re='^  [a-z-]+:$'
+
+  while IFS= read -r line; do
+    if [[ "${line}" == "${block}" ]]; then
+      in_block=1
+    elif [[ "${line}" =~ ${block_header_re} ]]; then
+      in_block=0
+    fi
+
+    if [[ "${in_block}" -eq 1 ]] && [[ "${line}" == "    max_length:"* ]]; then
+      rewritten="${rewritten}    max_length: ${value}"$'\n'
+    else
+      rewritten="${rewritten}${line}"$'\n'
+    fi
+  done < .ai-hooks.yml
+
+  printf '%s' "${rewritten}" > .ai-hooks.yml
+}
+
+# A syntactically valid but well-known-fake AWS access key ID. Built by
+# concatenation so this test file does not itself contain a full match, which
+# would make the repo's own pre-push hook flag it.
+fake_aws_key() {
+  echo "AKIA""IOSFODNN7EXAMPLE"
 }
 
 # --- Pre-Commit Tests ---
@@ -156,19 +244,31 @@ test_pre_commit() {
   fi
   cleanup_test_repo
 
-  # Test: Ignored files should be skipped
+  # Test: a staged file matching hooks.pre-commit.ignore is skipped, not reviewed
   setup_test_repo
-  # Add an ignore pattern to config
-  if [[ -f ".ai-hooks.yml" ]]; then
-    stage_file "package-lock.json" '{"lockfileVersion": 3}'
-    if output=$(bash "${hook}" 2>&1); then
-      pass "Ignored files: handled correctly"
+  stage_file "package-lock.json" '{"lockfileVersion": 3}'
+  if output=$(bash "${hook}" 2>&1); then
+    if echo "${output}" | grep -qi "match ignore patterns"; then
+      pass "Ignored files: package-lock.json skipped via config ignore list"
     else
-      # Even if it fails, the ignore logic might not have matched in dry-run
-      pass "Ignored files: script ran without crashing"
+      fail "Ignored files: exited 0 but did not report skipping the ignored file" "$(echo "${output}" | tail -3)"
     fi
   else
-    pass "Ignored files: skipped (no config)"
+    fail "Ignored files: should exit 0" "$(echo "${output}" | tail -3)"
+  fi
+  cleanup_test_repo
+
+  # Test: runs against built-in defaults when no .ai-hooks.yml exists
+  setup_test_repo no-config
+  stage_file "defaults.js" "const y = 2;"
+  if output=$(bash "${hook}" 2>&1); then
+    if echo "${output}" | grep -qi "no .ai-hooks.yml found"; then
+      pass "No config: falls back to built-in defaults"
+    else
+      fail "No config: exited 0 but did not report using defaults" "$(echo "${output}" | tail -3)"
+    fi
+  else
+    fail "No config: should not block the commit" "$(echo "${output}" | tail -3)"
   fi
   cleanup_test_repo
 
@@ -250,6 +350,31 @@ test_prepare_commit_msg() {
   else
     fail "Ticket detection: missing branch name parsing"
   fi
+
+  # Test: the ticket prefix is spent out of the max_length budget, and when the
+  # finished subject still will not pass commit-msg the generator says so.
+  # Both hooks read their own max_length, so squeeze both to a value the mock
+  # message cannot meet once "PROJ-42: " is prepended.
+  setup_test_repo
+  set_hook_max_length "prepare-commit-msg" 20
+  set_hook_max_length "commit-msg" 20
+  git checkout --quiet -b "feature/PROJ-42-add-login"
+  stage_file "login.js" "function login() { return true; }"
+  msg_file=$(mktemp)
+  echo "" > "${msg_file}"
+  if output=$(bash "${hook}" "${msg_file}" "" 2>&1); then
+    if ! echo "${output}" | grep -q "commit-msg will reject it"; then
+      fail "Length budget: prefixed subject is over max_length but no warning was printed" "$(echo "${output}" | tail -3)"
+    elif bash "${REPO_ROOT}/hooks/commit-msg/validate.sh" "${msg_file}" >/dev/null 2>&1; then
+      fail "Length budget: warned about a rejection the validator does not actually make"
+    else
+      pass "Length budget: generator warns, and commit-msg does reject the prefixed subject"
+    fi
+  else
+    fail "Length budget: generator should still write a message" "$(echo "${output}" | tail -3)"
+  fi
+  rm -f "${msg_file}"
+  cleanup_test_repo
 }
 
 # --- Commit-Msg Tests ---
@@ -324,18 +449,35 @@ test_commit_msg() {
   rm -f "${msg_file}"
   cleanup_test_repo
 
-  # Test: Message too long
+  # Test: the ticket prefix must not let a message skip the description rules.
+  # The prefix carries its own colon, so a naive "cut at the first colon" reads
+  # the type as the description and the lowercase rule stops firing.
+  setup_test_repo
+  msg_file=$(mktemp)
+  echo "PROJ-42: feat: Add login" > "${msg_file}"
+  if output=$(bash "${hook}" "${msg_file}" 2>&1); then
+    fail "Ticket prefix: uppercase description should be rejected, prefix or not" "$(echo "${output}" | tail -3)"
+  else
+    if echo "${output}" | grep -qi "start with lowercase"; then
+      pass "Ticket prefix: 'PROJ-42: feat: Add login' still flagged for uppercase"
+    else
+      fail "Ticket prefix: rejected but not for the uppercase description" "$(echo "${output}" | tail -3)"
+    fi
+  fi
+  rm -f "${msg_file}"
+  cleanup_test_repo
+
+  # Test: Message too long (config max_length is 72)
   setup_test_repo
   msg_file=$(mktemp)
   echo "feat: this is a very long commit message that exceeds the maximum allowed length of seventy-two characters and should be flagged" > "${msg_file}"
   if output=$(bash "${hook}" "${msg_file}" 2>&1); then
-    # Might pass if max_length isn't enforced strictly in some configs
-    pass "Long message: handled (may or may not be rejected based on config)"
+    fail "Long message: 128-char subject should be rejected" "$(echo "${output}" | tail -3)"
   else
-    if echo "${output}" | grep -qi "length\|long\|characters"; then
-      pass "Long message: correctly flagged for length"
+    if echo "${output}" | grep -qi "characters (max"; then
+      pass "Long message: correctly flagged for exceeding max_length"
     else
-      pass "Long message: rejected"
+      fail "Long message: rejected but not for length" "$(echo "${output}" | tail -3)"
     fi
   fi
   rm -f "${msg_file}"
@@ -349,6 +491,33 @@ test_commit_msg() {
     pass "Breaking change: 'feat!: ...' accepted"
   else
     fail "Breaking change format should be valid" "$(echo "${output}" | tail -3)"
+  fi
+  rm -f "${msg_file}"
+  cleanup_test_repo
+
+  # Test: round trip. Both message hooks are enabled by default, so whatever
+  # prepare-commit-msg writes must pass commit-msg. With ticket_prefix on and a
+  # Jira/Linear branch name, the generated subject carries a "PROJ-42: " prefix
+  # -- if the validator rejects that, committing is impossible without
+  # --no-verify.
+  setup_test_repo
+  local generator="${REPO_ROOT}/hooks/prepare-commit-msg/auto-message.sh"
+  git checkout --quiet -b "feature/PROJ-42-add-login"
+  stage_file "login.js" "function login() { return true; }"
+  msg_file=$(mktemp)
+  echo "" > "${msg_file}"
+  if bash "${generator}" "${msg_file}" "" >/dev/null 2>&1; then
+    local round_trip_msg
+    round_trip_msg=$(head -1 "${msg_file}")
+    if [[ "${round_trip_msg}" != PROJ-42:* ]]; then
+      fail "Round trip: generator did not add the ticket prefix" "got: ${round_trip_msg}"
+    elif output=$(bash "${hook}" "${msg_file}" 2>&1); then
+      pass "Round trip: validator accepts generated '${round_trip_msg}'"
+    else
+      fail "Round trip: validator rejected the generated message" "got: ${round_trip_msg}"
+    fi
+  else
+    fail "Round trip: generator failed to write a message"
   fi
   rm -f "${msg_file}"
   cleanup_test_repo
@@ -410,13 +579,101 @@ test_pre_push() {
     fail "Dependency scanning: npm audit not found"
   fi
 
-  # Test: Runs without crashing when given no stdin
+  # Test: a committed secret is detected and blocks the push.
+  # This is the headline behavior of the hook, so assert it end to end rather
+  # than grepping the script for pattern literals.
   setup_test_repo
-  if output=$(echo "" | bash "${hook}" 2>&1); then
-    pass "No push data: exits cleanly"
+  local ref_line
+  ref_line=$(commit_and_ref_line "config.js" "const AWS_ACCESS_KEY_ID = '$(fake_aws_key)';")
+  if output=$(echo "${ref_line}" | bash "${hook}" 2>&1); then
+    fail "Secret scan: a staged AWS key should block the push" "$(echo "${output}" | tail -3)"
   else
-    # It's okay if it exits non-zero when there's no meaningful input
-    pass "No push data: handled without crash"
+    if echo "${output}" | grep -q "CRITICAL"; then
+      pass "Secret scan: AWS key in config.js reported CRITICAL and blocked the push"
+    else
+      fail "Secret scan: exited non-zero but reported no CRITICAL finding" "$(echo "${output}" | tail -3)"
+    fi
+  fi
+  cleanup_test_repo
+
+  # Test: the shipped ignore list is empty, so a secret in a doc still blocks.
+  # Wiring hooks.pre-push.ignore up must not quietly shrink what gets scanned.
+  setup_test_repo
+  ref_line=$(commit_and_ref_line "docs.md" "Example: AWS_ACCESS_KEY_ID = $(fake_aws_key)")
+  if output=$(echo "${ref_line}" | bash "${hook}" 2>&1); then
+    fail "Default ignore list: a secret in docs.md must still block the push" "$(echo "${output}" | tail -3)"
+  else
+    if echo "${output}" | grep -q "CRITICAL"; then
+      pass "Default ignore list: empty by default, so docs.md is still scanned"
+    else
+      fail "Default ignore list: exited non-zero but reported no CRITICAL finding" "$(echo "${output}" | tail -3)"
+    fi
+  fi
+  cleanup_test_repo
+
+  # Test: an ignore list belonging to a DIFFERENT hook block must not leak into
+  # pre-push. yaml_get_list once ended its outer sed range at '^[^ ]', which
+  # only stops at a top-level key, so the range ran past '  pre-commit:' and
+  # pre-push inherited that block's ignore list. With pre-push listed first and
+  # carrying no ignore of its own, a pre-commit 'ignore: ["*.md"]' silently
+  # turned off secret scanning for the whole push.
+  setup_test_repo
+  cat > .ai-hooks.yml <<'PROBE_EOF'
+provider: claude
+hooks:
+  pre-push:
+    enabled: true
+    scan_secrets: true
+    max_file_size: 5MB
+  pre-commit:
+    enabled: true
+    ignore:
+      - "*.md"
+PROBE_EOF
+  ref_line=$(commit_and_ref_line "notes.md" "Example: AWS_ACCESS_KEY_ID = $(fake_aws_key)")
+  if output=$(echo "${ref_line}" | bash "${hook}" 2>&1); then
+    fail "Cross-block ignore: a pre-commit ignore list must not disable the pre-push scan" "$(echo "${output}" | tail -3)"
+  else
+    if echo "${output}" | grep -q "CRITICAL"; then
+      pass "Cross-block ignore: pre-push ignores only its own block"
+    else
+      fail "Cross-block ignore: exited non-zero but reported no CRITICAL finding" "$(echo "${output}" | tail -3)"
+    fi
+  fi
+  cleanup_test_repo
+
+  # Test: a secret in a file matching an opted-in hooks.pre-push.ignore pattern
+  # does NOT block. This is the only escape hatch from a false positive in docs
+  # or fixtures, so it has to actually work. The pattern comes from the test,
+  # not from .ai-hooks.example.yml, so changing the shipped default cannot
+  # break this assertion.
+  setup_test_repo
+  set_pre_push_ignore "docs/**"
+  mkdir -p docs
+  ref_line=$(commit_and_ref_line "docs/setup.md" "Example: AWS_ACCESS_KEY_ID = $(fake_aws_key)")
+  if output=$(echo "${ref_line}" | bash "${hook}" 2>&1); then
+    if echo "${output}" | grep -q "CRITICAL"; then
+      fail "Ignore list: 'docs/**' was configured but still reported CRITICAL" "$(echo "${output}" | tail -3)"
+    else
+      pass "Ignore list: secret in docs/setup.md suppressed by configured pattern"
+    fi
+  else
+    fail "Ignore list: 'docs/**' is ignored, so the push should not be blocked" "$(echo "${output}" | tail -3)"
+  fi
+  cleanup_test_repo
+
+  # Test: falls back to scanning the working tree when git sends no ref lines.
+  # Uses </dev/null, not `echo ""` -- a single blank line still enters the read
+  # loop, so it never reaches this code path.
+  setup_test_repo
+  if output=$(bash "${hook}" < /dev/null 2>&1); then
+    if echo "${output}" | grep -qi "no push data received"; then
+      pass "No push data: falls back to scanning local changes and exits 0"
+    else
+      fail "No push data: exited 0 but did not take the fallback path" "$(echo "${output}" | tail -3)"
+    fi
+  else
+    fail "No push data: should exit 0 on a clean repo" "$(echo "${output}" | tail -3)"
   fi
   cleanup_test_repo
 }

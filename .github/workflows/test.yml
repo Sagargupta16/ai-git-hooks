@@ -15,20 +15,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install ShellCheck
-        run: sudo apt-get install -y shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
 
+      # Discovered, not listed, so adding a hook cannot silently skip the lint.
       - name: Lint hook scripts
         run: |
-          shellcheck -x hooks/pre-commit/ai-review.sh
-          shellcheck -x hooks/prepare-commit-msg/auto-message.sh
-          shellcheck -x hooks/commit-msg/validate.sh
-          shellcheck -x hooks/pre-push/security-scan.sh
-          shellcheck -x scripts/install.sh
-          shellcheck -x scripts/uninstall.sh
-          shellcheck -x scripts/test.sh
+          scripts_found=$(find hooks scripts -type f -name '*.sh' | sort)
+          echo "Linting:"
+          echo "${scripts_found}"
+          echo "${scripts_found}" | xargs shellcheck -x
 
   test-hooks:
     name: Test Hooks (${{ matrix.os }})
@@ -40,7 +38,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install dependencies
         run: |
@@ -50,15 +48,19 @@ jobs:
             brew install jq
           fi
 
-      - name: Verify scripts are executable
+      # No chmod here on purpose. The scripts are committed with mode 100755,
+      # and this step is what proves a fresh clone can execute them. Adding a
+      # chmod back would hide a broken shipped file mode from CI.
+      # Discovered, not listed, so a new hook is covered without editing this.
+      - name: Verify shipped scripts are executable
         run: |
-          chmod +x hooks/pre-commit/ai-review.sh
-          chmod +x hooks/prepare-commit-msg/auto-message.sh
-          chmod +x hooks/commit-msg/validate.sh
-          chmod +x hooks/pre-push/security-scan.sh
-          chmod +x scripts/install.sh
-          chmod +x scripts/uninstall.sh
-          chmod +x scripts/test.sh
+          count=0
+          for f in $(find hooks scripts -type f -name '*.sh' | sort); do
+            test -x "$f" || { echo "Not executable in a fresh clone: $f"; exit 1; }
+            count=$((count + 1))
+          done
+          test "${count}" -gt 0 || { echo "Found no shell scripts to check"; exit 1; }
+          echo "All ${count} shell scripts are executable as checked out"
 
       - name: Run tests (dry-run mode)
         env:
@@ -70,7 +72,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
@@ -83,9 +85,8 @@ jobs:
           git config user.email "test@example.com"
           git config user.name "Test User"
 
-      - name: Make scripts executable
-        run: chmod +x scripts/*.sh hooks/**/*.sh
-
+      # Invoked directly, with no chmod first, so this exercises the file mode
+      # a user actually gets from `git clone`.
       - name: Run install script
         run: |
           cd /tmp/test-project

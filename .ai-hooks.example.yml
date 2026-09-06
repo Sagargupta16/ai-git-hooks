@@ -30,6 +30,7 @@ timeout: 30
 # --- Ollama-specific settings ---
 ollama:
   # Host URL for the Ollama server.
+  # The OLLAMA_HOST environment variable overrides this if both are set.
   host: "http://localhost:11434"
 
 # ============================================================================
@@ -159,24 +160,16 @@ hooks:
     # Supports: B, KB, MB, GB suffixes.
     max_file_size: "5MB"
 
-    # Additional regex patterns to scan for secrets.
-    # These are added on top of the built-in patterns.
-    custom_patterns: []
-    #   - name: "Internal API Token"
-    #     pattern: "internal_token_[a-zA-Z0-9]{32}"
-    #   - name: "Custom Secret"
-    #     pattern: "MY_SECRET=['\"][^'\"]+['\"]"
-
     # File patterns to exclude from secret scanning (glob syntax).
-    ignore:
-      - "*.lock"
-      - "*.md"
-      - "*.txt"
-      - "test/**"
-      - "tests/**"
-      - "__tests__/**"
-      - "*.test.*"
-      - "*.spec.*"
+    # Empty by default: every changed text file is scanned. Add a pattern only
+    # to silence a specific false positive, and keep it as narrow as you can --
+    # anything listed here is no longer scanned at all. Docs and test fixtures
+    # are common places for a real key to leak, so they are not excluded out of
+    # the box.
+    # Binary, minified and lockfile types are skipped by a built-in list.
+    ignore: []
+    #   - "docs/examples/aws-setup.md"
+    #   - "tests/fixtures/sample-credentials.json"
 
 # ============================================================================
 # Global Settings
@@ -184,6 +177,9 @@ hooks:
 
 # Set to true to skip all AI API calls and use mock responses.
 # Useful for testing hook logic without burning API credits.
+# The pre-push hook makes no AI calls, so for that hook dry_run only skips the
+# dependency audit -- secret and large-file scanning still run and can still
+# block the push.
 dry_run: false
 
 # Enable verbose/debug output. Shows API requests and responses.
