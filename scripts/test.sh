@@ -133,6 +133,44 @@ commit_and_ref_line() {
   echo "${ref} $(git rev-parse HEAD) ${ref} ${base}"
 }
 
+# Usage: set_pre_push_ignore <glob> [<glob> ...]
+# Replaces the empty `ignore: []` default under hooks.pre-push with the given
+# globs. The ignore-list tests supply their own patterns through this helper so
+# they assert the mechanism rather than whatever .ai-hooks.example.yml happens
+# to ship. Tightening or widening the shipped default cannot break them.
+set_pre_push_ignore() {
+  local list=""
+  local pattern
+  for pattern in "$@"; do
+    list="${list}      - \"${pattern}\"
+"
+  done
+
+  local rewritten
+  rewritten=$(awk -v list="${list}" '
+    $0 == "    ignore: []" { printf "    ignore:\n%s", list; next }
+    { print }
+  ' .ai-hooks.yml)
+  printf '%s\n' "${rewritten}" > .ai-hooks.yml
+}
+
+# Usage: set_hook_max_length <hook-block> <value>
+# Rewrites max_length inside one hook block of the test repo's config.
+# `max_length` appears under two blocks, so the rewrite has to be scoped.
+set_hook_max_length() {
+  local block="  $1:"
+  local value="$2"
+
+  local rewritten
+  rewritten=$(awk -v block="${block}" -v value="${value}" '
+    $0 == block { in_block = 1; print; next }
+    /^  [a-z-]+:$/ { in_block = 0 }
+    in_block && $0 ~ /^    max_length:/ { print "    max_length: " value; next }
+    { print }
+  ' .ai-hooks.yml)
+  printf '%s\n' "${rewritten}" > .ai-hooks.yml
+}
+
 # A syntactically valid but well-known-fake AWS access key ID. Built by
 # concatenation so this test file does not itself contain a full match, which
 # would make the repo's own pre-push hook flag it.
@@ -293,6 +331,31 @@ test_prepare_commit_msg() {
   else
     fail "Ticket detection: missing branch name parsing"
   fi
+
+  # Test: the ticket prefix is spent out of the max_length budget, and when the
+  # finished subject still will not pass commit-msg the generator says so.
+  # Both hooks read their own max_length, so squeeze both to a value the mock
+  # message cannot meet once "PROJ-42: " is prepended.
+  setup_test_repo
+  set_hook_max_length "prepare-commit-msg" 20
+  set_hook_max_length "commit-msg" 20
+  git checkout --quiet -b "feature/PROJ-42-add-login"
+  stage_file "login.js" "function login() { return true; }"
+  msg_file=$(mktemp)
+  echo "" > "${msg_file}"
+  if output=$(bash "${hook}" "${msg_file}" "" 2>&1); then
+    if ! echo "${output}" | grep -q "commit-msg will reject it"; then
+      fail "Length budget: prefixed subject is over max_length but no warning was printed" "$(echo "${output}" | tail -3)"
+    elif bash "${REPO_ROOT}/hooks/commit-msg/validate.sh" "${msg_file}" >/dev/null 2>&1; then
+      fail "Length budget: warned about a rejection the validator does not actually make"
+    else
+      pass "Length budget: generator warns, and commit-msg does reject the prefixed subject"
+    fi
+  else
+    fail "Length budget: generator should still write a message" "$(echo "${output}" | tail -3)"
+  fi
+  rm -f "${msg_file}"
+  cleanup_test_repo
 }
 
 # --- Commit-Msg Tests ---
@@ -363,6 +426,24 @@ test_commit_msg() {
     fail "Empty message should be rejected"
   else
     pass "Empty message: correctly rejected"
+  fi
+  rm -f "${msg_file}"
+  cleanup_test_repo
+
+  # Test: the ticket prefix must not let a message skip the description rules.
+  # The prefix carries its own colon, so a naive "cut at the first colon" reads
+  # the type as the description and the lowercase rule stops firing.
+  setup_test_repo
+  msg_file=$(mktemp)
+  echo "PROJ-42: feat: Add login" > "${msg_file}"
+  if output=$(bash "${hook}" "${msg_file}" 2>&1); then
+    fail "Ticket prefix: uppercase description should be rejected, prefix or not" "$(echo "${output}" | tail -3)"
+  else
+    if echo "${output}" | grep -qi "start with lowercase"; then
+      pass "Ticket prefix: 'PROJ-42: feat: Add login' still flagged for uppercase"
+    else
+      fail "Ticket prefix: rejected but not for the uppercase description" "$(echo "${output}" | tail -3)"
+    fi
   fi
   rm -f "${msg_file}"
   cleanup_test_repo
@@ -496,19 +577,38 @@ test_pre_push() {
   fi
   cleanup_test_repo
 
-  # Test: the same secret in a file matching hooks.pre-push.ignore does NOT
-  # block. This is the only escape hatch from a false positive in docs or
-  # fixtures, so it has to actually work.
+  # Test: the shipped ignore list is empty, so a secret in a doc still blocks.
+  # Wiring hooks.pre-push.ignore up must not quietly shrink what gets scanned.
   setup_test_repo
   ref_line=$(commit_and_ref_line "docs.md" "Example: AWS_ACCESS_KEY_ID = $(fake_aws_key)")
   if output=$(echo "${ref_line}" | bash "${hook}" 2>&1); then
+    fail "Default ignore list: a secret in docs.md must still block the push" "$(echo "${output}" | tail -3)"
+  else
     if echo "${output}" | grep -q "CRITICAL"; then
-      fail "Ignore list: '*.md' is in the config ignore list but still reported CRITICAL" "$(echo "${output}" | tail -3)"
+      pass "Default ignore list: empty by default, so docs.md is still scanned"
     else
-      pass "Ignore list: secret in docs.md suppressed by config ignore list"
+      fail "Default ignore list: exited non-zero but reported no CRITICAL finding" "$(echo "${output}" | tail -3)"
+    fi
+  fi
+  cleanup_test_repo
+
+  # Test: a secret in a file matching an opted-in hooks.pre-push.ignore pattern
+  # does NOT block. This is the only escape hatch from a false positive in docs
+  # or fixtures, so it has to actually work. The pattern comes from the test,
+  # not from .ai-hooks.example.yml, so changing the shipped default cannot
+  # break this assertion.
+  setup_test_repo
+  set_pre_push_ignore "docs/**"
+  mkdir -p docs
+  ref_line=$(commit_and_ref_line "docs/setup.md" "Example: AWS_ACCESS_KEY_ID = $(fake_aws_key)")
+  if output=$(echo "${ref_line}" | bash "${hook}" 2>&1); then
+    if echo "${output}" | grep -q "CRITICAL"; then
+      fail "Ignore list: 'docs/**' was configured but still reported CRITICAL" "$(echo "${output}" | tail -3)"
+    else
+      pass "Ignore list: secret in docs/setup.md suppressed by configured pattern"
     fi
   else
-    fail "Ignore list: '*.md' is ignored, so the push should not be blocked" "$(echo "${output}" | tail -3)"
+    fail "Ignore list: 'docs/**' is ignored, so the push should not be blocked" "$(echo "${output}" | tail -3)"
   fi
   cleanup_test_repo
 

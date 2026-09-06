@@ -82,6 +82,12 @@ TIMEOUT="30"
 STYLE="conventional"
 TICKET_PREFIX="true"
 MAX_LENGTH="72"
+# Ticket prefix taken from the branch name, empty when there is none.
+TICKET=""
+# Subject budget given to the model. This is MAX_LENGTH less the ticket prefix
+# that gets prepended afterwards, because commit-msg measures the finished
+# subject line, prefix included. Recomputed in main() once the config is read.
+PROMPT_MAX_LENGTH="${MAX_LENGTH}"
 CUSTOM_PROMPT=""
 DRY_RUN="${AI_HOOKS_DRY_RUN:-0}"
 # Ollama host from config. The OLLAMA_HOST env var takes precedence over it.
@@ -210,16 +216,16 @@ type(scope): description
 
 Where type is one of: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
 The scope is optional but encouraged if relevant.
-Keep the subject line under ${MAX_LENGTH} characters.
+Keep the subject line under ${PROMPT_MAX_LENGTH} characters.
 If the changes warrant it, add a blank line followed by bullet points explaining what changed."
       ;;
     simple)
-      style_instruction="Generate a brief one-line commit message under ${MAX_LENGTH} characters.
+      style_instruction="Generate a brief one-line commit message under ${PROMPT_MAX_LENGTH} characters.
 Focus on what changed and why. Use imperative mood (e.g., 'Add feature' not 'Added feature')."
       ;;
     detailed)
       style_instruction="Generate a detailed commit message with:
-- A subject line under ${MAX_LENGTH} characters in imperative mood
+- A subject line under ${PROMPT_MAX_LENGTH} characters in imperative mood
 - A blank line
 - Bullet points explaining what was changed and why
 
@@ -391,11 +397,24 @@ main() {
     diff_content=$(echo "${diff_content}" | head -n 500)
   fi
 
-  # 2. Build prompt
+  # 2. Work out the ticket prefix before building the prompt. commit-msg
+  # measures the finished subject line, prefix included, so asking the model for
+  # MAX_LENGTH characters and then prepending "PROJ-42: " produces a subject the
+  # validator rejects. Spend the prefix out of the same budget instead.
+  if [[ "${TICKET_PREFIX}" == "true" ]]; then
+    TICKET=$(detect_ticket)
+  fi
+
+  if [[ -n "${TICKET}" ]] && [[ $(( MAX_LENGTH - ${#TICKET} - 2 )) -gt 0 ]]; then
+    PROMPT_MAX_LENGTH=$(( MAX_LENGTH - ${#TICKET} - 2 ))
+    print_debug "Subject budget: ${PROMPT_MAX_LENGTH} (max_length ${MAX_LENGTH} minus '${TICKET}: ')"
+  fi
+
+  # 3. Build prompt
   local prompt
   prompt=$(build_prompt "${diff_content}")
 
-  # 3. Call AI provider
+  # 4. Call AI provider
   local generated_msg=""
 
   if [[ "${DRY_RUN}" == "1" ]]; then
@@ -439,34 +458,39 @@ main() {
     exit 0
   fi
 
-  # 4. Clean up the message (remove surrounding quotes, markdown code blocks)
+  # 5. Clean up the message (remove surrounding quotes, markdown code blocks)
   generated_msg=$(echo "${generated_msg}" | sed 's/^```[a-z]*$//' | sed 's/^```$//' | sed 's/^"//;s/"$//' | sed '/^$/d')
 
-  # 5. Prefix with ticket number if detected
-  if [[ "${TICKET_PREFIX}" == "true" ]]; then
-    local ticket
-    ticket=$(detect_ticket)
+  # 6. Prefix with the ticket detected in step 2
+  if [[ -n "${TICKET}" ]]; then
+    # Only prefix if ticket isn't already in the message
+    if ! echo "${generated_msg}" | head -1 | grep -qF "${TICKET}"; then
+      local first_line
+      first_line=$(echo "${generated_msg}" | head -1)
+      local rest
+      rest=$(echo "${generated_msg}" | tail -n +2)
 
-    if [[ -n "${ticket}" ]]; then
-      # Only prefix if ticket isn't already in the message
-      if ! echo "${generated_msg}" | head -1 | grep -qF "${ticket}"; then
-        local first_line
-        first_line=$(echo "${generated_msg}" | head -1)
-        local rest
-        rest=$(echo "${generated_msg}" | tail -n +2)
-
-        generated_msg="${ticket}: ${first_line}"
-        if [[ -n "${rest}" ]]; then
-          generated_msg="${generated_msg}
+      generated_msg="${TICKET}: ${first_line}"
+      if [[ -n "${rest}" ]]; then
+        generated_msg="${generated_msg}
 ${rest}"
-        fi
-
-        print_info "Prefixed ticket: ${ticket}"
       fi
+
+      print_info "Prefixed ticket: ${TICKET}"
     fi
   fi
 
-  # 6. Write the message to the commit message file
+  # The model can overshoot the budget it was given, and commit-msg counts the
+  # whole subject line. Say so here rather than leaving the next hook to reject
+  # the message with no hint about where the extra characters came from.
+  local final_subject
+  final_subject=$(echo "${generated_msg}" | head -1)
+  if [[ "${#final_subject}" -gt "${MAX_LENGTH}" ]]; then
+    print_warn "Subject is ${#final_subject} characters, over the ${MAX_LENGTH} max_length."
+    print_warn "commit-msg will reject it. Shorten the subject before saving."
+  fi
+
+  # 7. Write the message to the commit message file
   # Preserve any existing comments (lines starting with #)
   local existing_comments
   existing_comments=$(grep '^#' "${COMMIT_MSG_FILE}" 2>/dev/null || true)

@@ -161,17 +161,15 @@ hooks:
     max_file_size: "5MB"
 
     # File patterns to exclude from secret scanning (glob syntax).
-    # Use this for docs and fixtures that legitimately contain example keys.
-    # Binary and lockfile types are excluded by a built-in list as well.
-    ignore:
-      - "*.lock"
-      - "*.md"
-      - "*.txt"
-      - "test/**"
-      - "tests/**"
-      - "__tests__/**"
-      - "*.test.*"
-      - "*.spec.*"
+    # Empty by default: every changed text file is scanned. Add a pattern only
+    # to silence a specific false positive, and keep it as narrow as you can --
+    # anything listed here is no longer scanned at all. Docs and test fixtures
+    # are common places for a real key to leak, so they are not excluded out of
+    # the box.
+    # Binary, minified and lockfile types are skipped by a built-in list.
+    ignore: []
+    #   - "docs/examples/aws-setup.md"
+    #   - "tests/fixtures/sample-credentials.json"
 
 # ============================================================================
 # Global Settings

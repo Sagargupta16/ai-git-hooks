@@ -20,15 +20,13 @@ jobs:
       - name: Install ShellCheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 
+      # Discovered, not listed, so adding a hook cannot silently skip the lint.
       - name: Lint hook scripts
         run: |
-          shellcheck -x hooks/pre-commit/ai-review.sh
-          shellcheck -x hooks/prepare-commit-msg/auto-message.sh
-          shellcheck -x hooks/commit-msg/validate.sh
-          shellcheck -x hooks/pre-push/security-scan.sh
-          shellcheck -x scripts/install.sh
-          shellcheck -x scripts/uninstall.sh
-          shellcheck -x scripts/test.sh
+          scripts_found=$(find hooks scripts -type f -name '*.sh' | sort)
+          echo "Linting:"
+          echo "${scripts_found}"
+          echo "${scripts_found}" | xargs shellcheck -x
 
   test-hooks:
     name: Test Hooks (${{ matrix.os }})
@@ -53,18 +51,16 @@ jobs:
       # No chmod here on purpose. The scripts are committed with mode 100755,
       # and this step is what proves a fresh clone can execute them. Adding a
       # chmod back would hide a broken shipped file mode from CI.
+      # Discovered, not listed, so a new hook is covered without editing this.
       - name: Verify shipped scripts are executable
         run: |
-          for f in hooks/pre-commit/ai-review.sh \
-                   hooks/prepare-commit-msg/auto-message.sh \
-                   hooks/commit-msg/validate.sh \
-                   hooks/pre-push/security-scan.sh \
-                   scripts/install.sh \
-                   scripts/uninstall.sh \
-                   scripts/test.sh; do
+          count=0
+          for f in $(find hooks scripts -type f -name '*.sh' | sort); do
             test -x "$f" || { echo "Not executable in a fresh clone: $f"; exit 1; }
+            count=$((count + 1))
           done
-          echo "All 7 scripts are executable as checked out"
+          test "${count}" -gt 0 || { echo "Found no shell scripts to check"; exit 1; }
+          echo "All ${count} shell scripts are executable as checked out"
 
       - name: Run tests (dry-run mode)
         env:
