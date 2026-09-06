@@ -147,8 +147,14 @@ yaml_get_list() {
   # Simplified approach: search for the ignore block under pre-commit using
   # two nested sed ranges. (Full nested-depth tracking left as a TODO for a
   # proper YAML parser if shell-only parsing grows unwieldy.)
+  #
+  # The start must be anchored to '^  pre-commit:'. An unanchored
+  # /pre-commit:/ also matches a comment that merely mentions the hook, so a
+  # line like '    # pre-commit: patterns live further down' sitting inside the
+  # pre-push block opened the range there and returned PRE-PUSH's ignore list,
+  # silently shrinking what this hook reviews.
   local block
-  block=$(sed -n '/pre-commit:/,/^  [a-z]/p' "${file}" | sed -n "/    ${section_key}:/,/^    [a-z]/p")
+  block=$(sed -n '/^  pre-commit:/,/^  [a-z]/p' "${file}" | sed -n "/    ${section_key}:/,/^    [a-z]/p")
   echo "${block}" | grep '^ *- ' | sed 's/^ *- *//' | sed 's/"//g' | sed "s/'//g"
 }
 

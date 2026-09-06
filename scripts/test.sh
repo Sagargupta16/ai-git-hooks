@@ -258,6 +258,38 @@ test_pre_commit() {
   fi
   cleanup_test_repo
 
+  # Test: an ignore list belonging to a DIFFERENT hook block must not leak into
+  # pre-commit. yaml_get_list opened its outer sed range on an unanchored
+  # /pre-commit:/, which also matches a comment that merely mentions the hook.
+  # A cross-reference comment inside the pre-push block therefore started the
+  # range there and returned PRE-PUSH's ignore list, so pre-commit silently
+  # skipped files it was supposed to review.
+  setup_test_repo
+  cat > .ai-hooks.yml <<'PROBE_EOF'
+provider: claude
+hooks:
+  pre-push:
+    # pre-commit: patterns for that hook live further down
+    ignore:
+      - "vendor/**"
+  pre-commit:
+    enabled: true
+    severity: warn
+    max_files: 20
+PROBE_EOF
+  mkdir -p vendor
+  stage_file "vendor/leaky.js" "const leaked = 1;"
+  if output=$(bash "${hook}" 2>&1); then
+    if echo "${output}" | grep -qi "match ignore patterns"; then
+      fail "Cross-block ignore: pre-push's ignore list must not suppress pre-commit review" "$(echo "${output}" | tail -3)"
+    else
+      pass "Cross-block ignore: pre-commit reads only its own block"
+    fi
+  else
+    fail "Cross-block ignore: should exit 0 in dry-run mode" "$(echo "${output}" | tail -3)"
+  fi
+  cleanup_test_repo
+
   # Test: runs against built-in defaults when no .ai-hooks.yml exists
   setup_test_repo no-config
   stage_file "defaults.js" "const y = 2;"
