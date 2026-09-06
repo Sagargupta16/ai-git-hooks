@@ -172,8 +172,15 @@ load_config() {
 # Examples:
 #   feature/PROJ-42-add-login   -> PROJ-42
 #   PROJ-123/fix-bug            -> PROJ-123
-#   fix/gh-456-something        -> #456
+#   fix/gh-456-something        -> GH-456
 #   feature/LINEAR-789          -> LINEAR-789
+#
+# GitHub issues yield GH-456, not #456. A leading '#' makes the whole first
+# line a comment: git strips it under its default cleanup, and validate.sh's
+# read_commit_message drops every '^#' line, so the generated subject vanished
+# and the user got an empty commit message with no explanation. GH-456 also
+# needs no new pattern in the validator, since it already matches the
+# Jira/Linear alternative [A-Z][A-Z0-9]+-[0-9]+.
 
 detect_ticket() {
   local branch
@@ -194,8 +201,9 @@ detect_ticket() {
     return
   fi
 
-  # Match GitHub issue style: gh-123 or #123
-  ticket=$(echo "${branch}" | grep -oE 'gh-([0-9]+)' | head -1 | sed 's/gh-/#/') || true
+  # Match GitHub issue style: gh-123 -> GH-123. Uppercase on purpose, see the
+  # note above: '#123' would be read as a comment and deleted.
+  ticket=$(echo "${branch}" | grep -oiE 'gh-([0-9]+)' | head -1 | sed 's/^[Gg][Hh]-/GH-/') || true
 
   if [[ -n "${ticket}" ]]; then
     echo "${ticket}"

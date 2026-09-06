@@ -172,8 +172,15 @@ load_config() {
 # Read the commit message, stripping comment lines and leading/trailing whitespace
 read_commit_message() {
   local msg_file="$1"
-  # Remove lines starting with # (git comments) and trim
-  grep -v '^#' "${msg_file}" | sed '/^$/{ N; /^\n$/d; }' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+  # Remove lines starting with # (git comments) and trim.
+  #
+  # The '|| :' matters. grep exits 1 when it selects nothing, which happens
+  # whenever every line is a comment. Under 'set -euo pipefail' that aborted
+  # the hook here, before main() could reach its "Commit message is empty."
+  # branch, so the user saw the banner, an exit status of 1, and nothing else.
+  { grep -v '^#' "${msg_file}" || :; } |
+    sed '/^$/{ N; /^\n$/d; }' |
+    sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
 }
 
 validate_conventional() {
@@ -199,7 +206,13 @@ validate_conventional() {
   # The prefix alternatives mirror detect_ticket() in auto-message.sh. Kept in
   # one variable so the format check and the description checks below cannot
   # drift apart.
-  local ticket_re="([A-Z][A-Z0-9]+-[0-9]+|#[0-9]+): "
+  #
+  # There is deliberately no '#[0-9]+' alternative. It used to be here, but it
+  # was unreachable: read_commit_message strips every '^#' line before this
+  # runs, and git's default cleanup does the same, so a '#456: ...' subject is
+  # already gone by the time it could be matched. detect_ticket now emits
+  # GH-456 for GitHub branches, which the Jira/Linear alternative accepts.
+  local ticket_re="([A-Z][A-Z0-9]+-[0-9]+): "
 
   # The conventional part of the subject, with any ticket prefix removed. Every
   # rule below that talks about the type or the description works on this, not

@@ -553,6 +553,54 @@ test_commit_msg() {
   fi
   rm -f "${msg_file}"
   cleanup_test_repo
+
+  # Test: round trip on a GitHub-issue branch. detect_ticket used to turn
+  # gh-456 into "#456", and a leading hash is a comment: git strips it under
+  # its default cleanup and read_commit_message drops every '^#' line, so the
+  # generated subject was deleted and the user got an empty commit message.
+  # The prefix is now GH-456, which needs no new validator pattern because it
+  # already matches the Jira/Linear alternative.
+  setup_test_repo
+  git checkout --quiet -b "fix/gh-456-something"
+  stage_file "repair.js" "function repair() { return 1; }"
+  msg_file=$(mktemp)
+  echo "" > "${msg_file}"
+  if bash "${generator}" "${msg_file}" "" >/dev/null 2>&1; then
+    local gh_msg
+    gh_msg=$(head -1 "${msg_file}")
+    if [[ "${gh_msg}" == \#* ]]; then
+      fail "GitHub ticket: prefix starts with '#', which git treats as a comment" "got: ${gh_msg}"
+    elif [[ "${gh_msg}" != GH-456:* ]]; then
+      fail "GitHub ticket: expected a GH-456 prefix" "got: ${gh_msg}"
+    elif output=$(bash "${hook}" "${msg_file}" 2>&1); then
+      pass "GitHub ticket: validator accepts generated '${gh_msg}'"
+    else
+      fail "GitHub ticket: validator rejected the generated message" "got: ${gh_msg}"
+    fi
+  else
+    fail "GitHub ticket: generator failed to write a message"
+  fi
+  rm -f "${msg_file}"
+  cleanup_test_repo
+
+  # Test: a message that is entirely comments must say so rather than exiting
+  # silently. grep -v '^#' returns 1 when it selects nothing, and under
+  # 'set -euo pipefail' that aborted the hook before main() reached its
+  # "Commit message is empty." branch, so the user saw only the banner.
+  setup_test_repo
+  msg_file=$(mktemp)
+  printf '#456: fix: repair thing\n' > "${msg_file}"
+  if output=$(bash "${hook}" "${msg_file}" 2>&1); then
+    fail "All-comment message: should not pass validation" "$(echo "${output}" | tail -3)"
+  else
+    if echo "${output}" | grep -qi "empty"; then
+      pass "All-comment message: reports an empty message instead of failing silently"
+    else
+      fail "All-comment message: exited non-zero with no explanation" "$(echo "${output}" | tail -3)"
+    fi
+  fi
+  rm -f "${msg_file}"
+  cleanup_test_repo
 }
 
 # --- Pre-Push Tests ---
