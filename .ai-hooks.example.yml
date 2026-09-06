@@ -96,9 +96,11 @@ hooks:
     style: conventional
 
     # Auto-detect ticket number from branch name and prefix the message.
-    # Supports Jira (PROJ-123), Linear (PROJ-123), and GitHub (#123) formats.
+    # Supports Jira (PROJ-123), Linear (PROJ-123), and GitHub (gh-123) formats.
     # Example branch: feature/PROJ-42-add-login
     # Result: "PROJ-42: feat(auth): add login functionality"
+    # A gh-456 branch yields the prefix GH-456, not #456: a leading '#' makes
+    # the line a comment, so git and the validator both delete it.
     ticket_prefix: true
 
     # Maximum length for the first line of the commit message.
