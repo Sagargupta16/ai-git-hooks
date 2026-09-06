@@ -138,37 +138,56 @@ commit_and_ref_line() {
 # globs. The ignore-list tests supply their own patterns through this helper so
 # they assert the mechanism rather than whatever .ai-hooks.example.yml happens
 # to ship. Tightening or widening the shipped default cannot break them.
+# Done in pure bash on purpose: passing the multi-line replacement through
+# `awk -v` fails on the macOS awk with "newline in string".
 set_pre_push_ignore() {
-  local list=""
-  local pattern
-  for pattern in "$@"; do
-    list="${list}      - \"${pattern}\"
-"
-  done
+  local rewritten=""
+  local line pattern
 
-  local rewritten
-  rewritten=$(awk -v list="${list}" '
-    $0 == "    ignore: []" { printf "    ignore:\n%s", list; next }
-    { print }
-  ' .ai-hooks.yml)
-  printf '%s\n' "${rewritten}" > .ai-hooks.yml
+  while IFS= read -r line; do
+    if [[ "${line}" == "    ignore: []" ]]; then
+      rewritten="${rewritten}    ignore:"$'\n'
+      for pattern in "$@"; do
+        rewritten="${rewritten}      - \"${pattern}\""$'\n'
+      done
+    else
+      rewritten="${rewritten}${line}"$'\n'
+    fi
+  done < .ai-hooks.yml
+
+  printf '%s' "${rewritten}" > .ai-hooks.yml
 }
 
 # Usage: set_hook_max_length <hook-block> <value>
 # Rewrites max_length inside one hook block of the test repo's config.
 # `max_length` appears under two blocks, so the rewrite has to be scoped.
+# Pure bash, like set_pre_push_ignore above, to keep awk out of the harness.
 set_hook_max_length() {
   local block="  $1:"
   local value="$2"
 
-  local rewritten
-  rewritten=$(awk -v block="${block}" -v value="${value}" '
-    $0 == block { in_block = 1; print; next }
-    /^  [a-z-]+:$/ { in_block = 0 }
-    in_block && $0 ~ /^    max_length:/ { print "    max_length: " value; next }
-    { print }
-  ' .ai-hooks.yml)
-  printf '%s\n' "${rewritten}" > .ai-hooks.yml
+  local rewritten=""
+  local line
+  local in_block=0
+  # Any other two-space hook header ends the block. Held in a variable because
+  # bash 3.2 and bash 4 disagree about quoting on the right of =~.
+  local block_header_re='^  [a-z-]+:$'
+
+  while IFS= read -r line; do
+    if [[ "${line}" == "${block}" ]]; then
+      in_block=1
+    elif [[ "${line}" =~ ${block_header_re} ]]; then
+      in_block=0
+    fi
+
+    if [[ "${in_block}" -eq 1 ]] && [[ "${line}" == "    max_length:"* ]]; then
+      rewritten="${rewritten}    max_length: ${value}"$'\n'
+    else
+      rewritten="${rewritten}${line}"$'\n'
+    fi
+  done < .ai-hooks.yml
+
+  printf '%s' "${rewritten}" > .ai-hooks.yml
 }
 
 # A syntactically valid but well-known-fake AWS access key ID. Built by
