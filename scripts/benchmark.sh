@@ -90,8 +90,11 @@ run_hook() {
   local esc=$'\033'
   sha=$(git -C "${scan_dir}" rev-parse HEAD)
 
-  (cd "${scan_dir}" && echo "refs/heads/main ${sha} refs/heads/main ${zero_sha}" \
-    | AI_HOOKS_DRY_RUN=1 bash "${HOOK}" 2>&1 || true) \
+  (
+    cd "${scan_dir}" || exit 1
+    echo "refs/heads/main ${sha} refs/heads/main ${zero_sha}" \
+      | AI_HOOKS_DRY_RUN=1 bash "${HOOK}" 2>&1 || true
+  ) \
     | sed "s/${esc}\[[0-9;]*m//g" \
     | sed -n 's/^\[CRITICAL\] Possible .* found in \(.*:[0-9][0-9]*\)$/\1/p' \
     | sort -u
