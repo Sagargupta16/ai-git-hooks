@@ -30,34 +30,38 @@ DIM='\033[2m'
 RESET='\033[0m'
 
 # --- Utility Functions ---
+# Every message goes to stderr, as in auto-message.sh. The provider calls run
+# inside $(...), so a message on stdout was captured into the response instead
+# of shown: a missing API key or an API error blocked the commit with no
+# explanation at all, and a debug line was parsed as part of the review.
 
 print_header() {
-  echo ""
-  echo -e "${BOLD}${BLUE}======================================${RESET}"
-  echo -e "${BOLD}${BLUE}  AI Code Review (pre-commit)${RESET}"
-  echo -e "${BOLD}${BLUE}======================================${RESET}"
-  echo ""
+  echo "" >&2
+  echo -e "${BOLD}${BLUE}======================================${RESET}" >&2
+  echo -e "${BOLD}${BLUE}  AI Code Review (pre-commit)${RESET}" >&2
+  echo -e "${BOLD}${BLUE}======================================${RESET}" >&2
+  echo "" >&2
 }
 
 print_pass() {
-  echo -e "${GREEN}[PASS]${RESET} $1"
+  echo -e "${GREEN}[PASS]${RESET} $1" >&2
 }
 
 print_warn() {
-  echo -e "${YELLOW}[WARN]${RESET} $1"
+  echo -e "${YELLOW}[WARN]${RESET} $1" >&2
 }
 
 print_error() {
-  echo -e "${RED}[ERROR]${RESET} $1"
+  echo -e "${RED}[ERROR]${RESET} $1" >&2
 }
 
 print_info() {
-  echo -e "${CYAN}[INFO]${RESET} $1"
+  echo -e "${CYAN}[INFO]${RESET} $1" >&2
 }
 
 print_debug() {
   if [[ "${AI_HOOKS_DEBUG:-0}" == "1" ]]; then
-    echo -e "${DIM}[DEBUG] $1${RESET}"
+    echo -e "${DIM}[DEBUG] $1${RESET}" >&2
   fi
 }
 

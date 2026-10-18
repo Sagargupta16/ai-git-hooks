@@ -59,10 +59,15 @@ else
   SOURCE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 fi
 
-# Target directory: the project where we're installing hooks
-TARGET_DIR="$(pwd)"
-GIT_DIR="${TARGET_DIR}/.git"
-HOOKS_DIR="${GIT_DIR}/hooks"
+# Target directory: the project where we're installing hooks.
+# Ask git rather than assuming "$(pwd)/.git/hooks". In a linked worktree or a
+# submodule .git is a file, not a directory, so the old check reported "Not a
+# git repository". And with core.hooksPath set (husky and similar), git never
+# runs .git/hooks at all, so hooks copied there were silently dead.
+# --show-toplevel also puts .ai-hooks.yml at the root, where the hooks read it,
+# when the installer is run from a subdirectory.
+TARGET_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+HOOKS_DIR="$(git -C "${TARGET_DIR}" rev-parse --path-format=absolute --git-path hooks 2>/dev/null || true)"
 
 # --- Validation ---
 
@@ -93,14 +98,15 @@ validate_source() {
 validate_target() {
   print_step "2. Validating target project..."
 
-  if [[ ! -d "${GIT_DIR}" ]]; then
+  if [[ -z "${HOOKS_DIR}" ]]; then
     print_error "Not a git repository: ${TARGET_DIR}"
-    print_info "Run this script from your project root (where .git/ is)."
+    print_info "Run this script from inside your project."
     print_info "Or initialize git first: git init"
     exit 1
   fi
 
   print_pass "Git repository found: ${TARGET_DIR}"
+  print_info "Hooks directory: ${HOOKS_DIR}"
 
   # Create hooks directory if it doesn't exist
   if [[ ! -d "${HOOKS_DIR}" ]]; then
@@ -274,11 +280,11 @@ check_dependencies() {
     print_error "git is required but not installed."
   fi
 
-  # Recommended
+  # Required: the pre-commit hook blocks the commit without it
   if command -v jq &>/dev/null; then
     print_pass "jq: $(jq --version 2>/dev/null || echo 'installed')"
   else
-    print_warn "jq is recommended but not installed."
+    print_error "jq is required but not installed. The pre-commit hook blocks commits without it."
     print_info "Install: brew install jq (macOS) or apt install jq (Linux)"
   fi
 

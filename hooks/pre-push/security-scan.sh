@@ -206,8 +206,11 @@ declare -a SECRET_PATTERNS=(
   # Anthropic
   'sk-ant-api[a-zA-Z0-9_-]{20,}'
 
-  # OpenAI
+  # OpenAI. The legacy shape plus the current prefixed keys: 'sk-proj-',
+  # 'sk-svcacct-' and 'sk-admin-' carry '-' and '_', so the legacy pattern,
+  # which needs 20 alphanumerics straight after 'sk-', never matched them.
   'sk-[a-zA-Z0-9]{20,}'
+  'sk-(proj|svcacct|admin)-[A-Za-z0-9_-]{20,}'
 
   # Google
   'AIza[0-9A-Za-z_-]{35}'
@@ -263,6 +266,7 @@ declare -a SECRET_NAMES=(
   "GitHub Refresh Token"
   "Anthropic API Key"
   "OpenAI API Key"
+  "OpenAI Project/Service Key"
   "Google API Key"
   "Slack Bot Token"
   "Slack User Token"
@@ -568,15 +572,29 @@ main() {
 
     if [[ "${remote_sha}" == "${zero_sha}" ]]; then
       # New branch - scan all commits not on any remote branch
-      range="${local_sha}"
-      # Get commits not reachable from any remote ref
       local commit_list
       commit_list=$(git log --oneline "${local_sha}" --not --remotes 2>/dev/null || true)
       if [[ -z "${commit_list}" ]]; then
         print_info "No new commits to scan."
         continue
       fi
-      range="$(git merge-base HEAD "$(git rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || echo 'HEAD~10')" 2>/dev/null || echo "${local_sha}~10")..${local_sha}"
+      # Diff from the commit where the new work leaves already-pushed history.
+      # rev-list --boundary marks that commit with a leading '-'. When there is
+      # none (the first push of a repo, nothing on any remote yet), diff from
+      # the empty tree so every pushed file is scanned.
+      #
+      # This used to be merge-base(HEAD, @{upstream} or HEAD~10), falling back
+      # to ${local_sha}~10. A new branch has no upstream, and a repo with fewer
+      # than 11 commits has no HEAD~10, so the range was invalid, git diff
+      # failed silently, and the first push of a small repo reported "All
+      # checks passed" with a key in it. On longer histories it scanned only
+      # the last 10 commits of HEAD, which is not even the branch being pushed.
+      local base
+      base=$(git rev-list --boundary "${local_sha}" --not --remotes 2>/dev/null | sed -n 's/^-//p' | head -1 || true)
+      if [[ -z "${base}" ]]; then
+        base=$(git hash-object -t tree /dev/null)
+      fi
+      range="${base}..${local_sha}"
     else
       range="${remote_sha}..${local_sha}"
     fi

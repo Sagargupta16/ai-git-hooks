@@ -61,8 +61,9 @@ hooks:
     # before sending to the AI to stay within token limits.
     max_diff_lines: 500
 
-    # File patterns to ignore (glob syntax). These files are excluded
-    # from AI review even if staged.
+    # File patterns to ignore (glob syntax). They decide whether the review
+    # runs at all: if every staged file matches, it is skipped. Once it does
+    # run, the request carries the full staged diff, ignored files included.
     ignore:
       - "*.lock"
       - "*.min.js"

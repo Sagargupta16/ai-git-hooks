@@ -40,8 +40,9 @@ print_info()  { echo -e "  ${CYAN}[*]${RESET}  $1"; }
 # --- Determine Paths ---
 
 TARGET_DIR="${1:-$(pwd)}"
-GIT_DIR="${TARGET_DIR}/.git"
-HOOKS_DIR="${GIT_DIR}/hooks"
+# Resolved by git, the same way install.sh does it, so worktrees, submodules
+# and core.hooksPath uninstall from where the hooks were actually installed.
+HOOKS_DIR="$(git -C "${TARGET_DIR}" rev-parse --path-format=absolute --git-path hooks 2>/dev/null || true)"
 
 # Hook names and their identifying strings (parallel arrays for bash 3.2 compat)
 HOOK_NAMES=("pre-commit" "prepare-commit-msg" "commit-msg" "pre-push")
@@ -49,7 +50,7 @@ HOOK_IDENTIFIERS=("AI Code Review" "Commit Message Generator" "Commit Message Va
 
 # --- Validation ---
 
-if [[ ! -d "${GIT_DIR}" ]]; then
+if [[ -z "${HOOKS_DIR}" ]]; then
   print_error "Not a git repository: ${TARGET_DIR}"
   print_info "Run this script from your project root."
   exit 1
