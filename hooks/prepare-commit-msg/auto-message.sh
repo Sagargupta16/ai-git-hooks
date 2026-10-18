@@ -56,7 +56,9 @@ print_debug() {
 
 # --- Arguments ---
 COMMIT_MSG_FILE="${1:-}"
-COMMIT_SOURCE="${2:-}"
+# The pre-commit framework passes only the message file and puts the source in
+# PRE_COMMIT_COMMIT_MSG_SOURCE, so read it from there when git's $2 is absent.
+COMMIT_SOURCE="${2:-${PRE_COMMIT_COMMIT_MSG_SOURCE:-}}"
 # COMMIT_SHA="${3:-}"  # unused but received for amend
 
 # If the user provided a message via -m, or this is a merge/squash, skip.

@@ -1,0 +1,33 @@
+# Hook manifest for the pre-commit framework (https://pre-commit.com).
+# Each hook reads .ai-hooks.yml from the repo root, exactly as when it is
+# installed with scripts/install.sh.
+- id: ai-review
+  name: AI code review
+  description: Reviews the staged diff with Claude, OpenAI or Ollama and blocks at the configured severity.
+  entry: hooks/pre-commit/ai-review.sh
+  language: script
+  pass_filenames: false
+  stages: [pre-commit]
+
+- id: ai-commit-message
+  name: AI commit message
+  description: Writes a conventional commit message from the staged diff into the commit message file.
+  entry: hooks/prepare-commit-msg/auto-message.sh
+  language: script
+  stages: [prepare-commit-msg]
+
+- id: commit-msg-validate
+  name: Commit message validator
+  description: Rule-based conventional commit check, with an optional AI-suggested rewrite on failure.
+  entry: hooks/commit-msg/validate.sh
+  language: script
+  stages: [commit-msg]
+
+- id: secret-scan
+  name: Pre-push secret scan
+  description: Regex secret scan, blob-size check and npm audit / pip-audit over the commits being pushed. No AI call.
+  entry: hooks/pre-push/security-scan.sh
+  language: script
+  pass_filenames: false
+  always_run: true
+  stages: [pre-push]

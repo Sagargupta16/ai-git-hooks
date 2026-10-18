@@ -11,6 +11,8 @@ set -euo pipefail
 #
 # Arguments (passed by git):
 #   stdin receives lines of: <local ref> <local sha> <remote ref> <remote sha>
+#   Under the pre-commit framework the range comes from PRE_COMMIT_FROM_REF and
+#   PRE_COMMIT_TO_REF instead (or PRE_COMMIT_LOCAL_BRANCH for a first push).
 #
 # Exit codes:
 #   0 - No critical issues found (push proceeds)
@@ -190,6 +192,7 @@ load_config() {
 # --- Secret Patterns ---
 # Built-in patterns for common secrets and credentials.
 
+# shellcheck disable=SC2016  # '\$' in the hash patterns is a regex literal
 declare -a SECRET_PATTERNS=(
   # AWS
   'AKIA[0-9A-Z]{16}'
@@ -236,22 +239,48 @@ declare -a SECRET_PATTERNS=(
   # char. A previous "\x27" is NOT an escape grep understands -- it landed in
   # the class as the literal chars \ x 2 7, so single-quoted secrets were
   # never matched at all.
-  'password\s*=\s*["'\''][^"'\'']{8,}["'\'']'
-  'secret\s*=\s*["'\''][^"'\'']{8,}["'\'']'
-  'api_key\s*=\s*["'\''][^"'\'']{8,}["'\'']'
-  'apikey\s*=\s*["'\''][^"'\'']{8,}["'\'']'
-  'access_token\s*=\s*["'\''][^"'\'']{8,}["'\'']'
-  'auth_token\s*=\s*["'\''][^"'\'']{8,}["'\'']'
-  'private_key\s*=\s*["'\''][^"'\'']{8,}["'\'']'
+  #
+  # The key may itself be quoted and the separator may be ':' as well as '=',
+  # so JSON ("password": "...") and YAML (password: '...') assignments match
+  # too. scripts/benchmark.sh found the '='-only form missed every JSON config
+  # in its corpus. The value must still be quoted and 8+ characters, which is
+  # what keeps 'password = os.environ[...]' and short placeholders out.
+  'password["'\'']?[[:space:]]*[:=][[:space:]]*["'\''][^"'\'']{8,}["'\'']'
+  'secret["'\'']?[[:space:]]*[:=][[:space:]]*["'\''][^"'\'']{8,}["'\'']'
+  'api_key["'\'']?[[:space:]]*[:=][[:space:]]*["'\''][^"'\'']{8,}["'\'']'
+  'apikey["'\'']?[[:space:]]*[:=][[:space:]]*["'\''][^"'\'']{8,}["'\'']'
+  'access_token["'\'']?[[:space:]]*[:=][[:space:]]*["'\''][^"'\'']{8,}["'\'']'
+  '(auth|oauth)_token["'\'']?[[:space:]]*[:=][[:space:]]*["'\''][^"'\'']{8,}["'\'']'
+  'private_key["'\'']?[[:space:]]*[:=][[:space:]]*["'\''][^"'\'']{8,}["'\'']'
 
-  # Private keys
-  '-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'
+  # Private keys: PEM of any type (RSA, EC, DSA, OPENSSH, ENCRYPTED, PGP) and
+  # PuTTY .ppk files
+  '-----BEGIN ([A-Z]+ )*PRIVATE KEY( BLOCK)?-----'
+  'PuTTY-User-Key-File-[0-9]+:'
 
   # Connection strings
   'mongodb(\+srv)?://[a-zA-Z0-9._%-]+:[a-zA-Z0-9._%-]+@'
   'postgres(ql)?://[a-zA-Z0-9._%-]+:[a-zA-Z0-9._%-]+@'
   'mysql://[a-zA-Z0-9._%-]+:[a-zA-Z0-9._%-]+@'
   'redis://[a-zA-Z0-9._%-]*:[a-zA-Z0-9._%-]+@'
+  # user:password@ in a web, file-transfer or mail URL (.git-credentials,
+  # pip or npm registry URLs, SMTP settings). The password needs 6+ characters
+  # and no template syntax, which drops the 'user:pass@host' examples and
+  # '{USER}:{PASSWORD}@' f-strings that fill HTTP client docs and tests.
+  '(https?|s?ftp|smtps?|imaps?|amqps?)://[^/[:space:]:]+:[^/[:space:]{}$<>]{6,}@[A-Za-z0-9.-]+'
+
+  # Registry and tool credentials. The npm keys must open the line or follow
+  # the registry's ':' (//registry.npmjs.org/:_authToken=...), so code such as
+  # 'old_auth = requests...' or 'this._authToken = token' is not matched.
+  '(^|[[:space:]:])_authToken[[:space:]]*=[[:space:]]*[^$[:space:]][^[:space:]]{7,}'
+  '(^|[[:space:]:])_auth[[:space:]]*=[[:space:]]*[A-Za-z0-9+/=]{8,}'
+  '"auth"[[:space:]]*:[[:space:]]*"[A-Za-z0-9+/=]{16,}"'
+  'machine[[:space:]]+[^[:space:]]+[[:space:]]+login[[:space:]]+[^[:space:]]+[[:space:]]+password[[:space:]]+[^[:space:]]{6,}'
+  'APP_KEY=base64:[A-Za-z0-9+/=]{32,}'
+
+  # Unix password hashes: crypt MD5, SHA-256, SHA-512, Apache apr1, bcrypt
+  '\$(1|5|6|apr1)\$[./A-Za-z0-9]{1,16}\$[./A-Za-z0-9]{22,}'
+  '\$2[abxy]?\$[0-9]{2}\$[./A-Za-z0-9]{53}'
 )
 
 # Secret pattern friendly names (parallel array)
@@ -283,10 +312,19 @@ declare -a SECRET_NAMES=(
   "Hardcoded Auth Token"
   "Hardcoded Private Key"
   "Private Key File"
+  "PuTTY Private Key File"
   "MongoDB Connection String"
   "PostgreSQL Connection String"
   "MySQL Connection String"
   "Redis Connection String"
+  "Password in URL"
+  "npm Auth Token"
+  "npm Legacy Auth"
+  "Docker Registry Auth"
+  "netrc Password"
+  "Laravel APP_KEY"
+  "Unix Password Hash"
+  "bcrypt Password Hash"
 )
 
 # Files to always skip when scanning for secrets
@@ -340,6 +378,36 @@ should_skip_file() {
   return 1
 }
 
+# Read a unified diff on stdin and print every added line as
+#   <path> TAB <line number in the new file> TAB <line text>
+# The path comes from the '+++ b/<path>' header and the line number from the
+# '+<start>' of each '@@' hunk header. Header lines are only taken as headers
+# between 'diff --git' and the first hunk, so an added line that itself starts
+# with '+++' is still scanned as content. git ends the '+++' line with a tab
+# when the path contains a space, so that is trimmed. POSIX awk only: it runs
+# on the macOS system awk too.
+added_lines_with_location() {
+  awk '
+    /^diff --git / { in_header = 1; path = ""; next }
+    in_header && /^\+\+\+ / {
+      path = substr($0, 5)
+      sub(/^b\//, "", path)
+      sub(/\t$/, "", path)
+      next
+    }
+    /^@@ / {
+      in_header = 0
+      if (match($0, /\+[0-9]+/)) {
+        line = substr($0, RSTART + 1, RLENGTH - 1) + 0
+      }
+      next
+    }
+    in_header { next }
+    /^\+/ { printf "%s\t%d\t%s\n", path, line, substr($0, 2); line++; next }
+    /^ / { line++ }
+  '
+}
+
 scan_secrets_in_range() {
   local range="$1"
 
@@ -355,7 +423,9 @@ scan_secrets_in_range() {
   # (rather than the assembled diff text) is what makes the documented
   # hooks.pre-push.ignore key take effect.
   local files
-  files=$(git diff --name-only "${range}" 2>/dev/null || true)
+  # quotePath=false keeps non-ASCII paths literal, so they still work as
+  # pathspecs below instead of arriving as quoted octal escapes
+  files=$(git -c core.quotePath=false diff --name-only "${range}" 2>/dev/null || true)
 
   if [[ -z "${files}" ]]; then
     print_debug "No changed files to scan."
@@ -378,31 +448,39 @@ scan_secrets_in_range() {
     return
   fi
 
-  local diff_content
-  diff_content=$(git diff "${range}" -- "${scan_paths[@]}" 2>/dev/null || true)
+  # One record per added line: <path> TAB <line in the pushed file> TAB <text>.
+  # Tracking the path and the hunk's new-file line number is what lets a
+  # finding say where the secret is; grepping the raw diff only gave the
+  # position inside the diff text, which points at nothing the user can open.
+  local added_lines
+  added_lines=$(git -c core.quotePath=false diff --no-color --no-ext-diff -U0 \
+    --src-prefix=a/ --dst-prefix=b/ "${range}" -- "${scan_paths[@]}" 2>/dev/null \
+    | added_lines_with_location || true)
 
-  if [[ -z "${diff_content}" ]]; then
+  if [[ -z "${added_lines}" ]]; then
     print_debug "No diff content to scan."
     return
   fi
 
   local found_secrets=0
+  local tab=$'\t'
 
   for i in "${!SECRET_PATTERNS[@]}"; do
     local pattern="${SECRET_PATTERNS[$i]}"
     local name="${SECRET_NAMES[$i]}"
 
-    # Search added lines (starting with +) in the diff
+    # Match after the path field, so a path cannot trigger a pattern. The tab
+    # before the text is left inside '.*' so that a pattern opening with
+    # (^|[[:space:]]) can still match at the start of the line text.
     local matches
-    matches=$(echo "${diff_content}" | grep -nE "^\+.*${pattern}" 2>/dev/null || true)
+    matches=$(echo "${added_lines}" | grep -E "^[^${tab}]*${tab}[0-9]+.*${pattern}" 2>/dev/null || true)
 
     if [[ -n "${matches}" ]]; then
       while IFS= read -r match; do
         [[ -z "${match}" ]] && continue
 
-        # Extract the line content, mask the secret
-        local line_content
-        line_content=$(echo "${match}" | sed 's/^[0-9]*://' | sed 's/^\+//')
+        local match_path match_line line_content
+        IFS="${tab}" read -r match_path match_line line_content <<< "${match}"
 
         # Mask the matched secret value.
         # Use a control-char delimiter: several patterns (connection strings)
@@ -412,7 +490,7 @@ scan_secrets_in_range() {
         sed_delim=$(printf '\001')
         masked=$(echo "${line_content}" | sed -E "s${sed_delim}${pattern}${sed_delim}***REDACTED***${sed_delim}g" | head -c 120)
 
-        print_critical "Possible ${name} found"
+        print_critical "Possible ${name} found in ${match_path}:${match_line}"
         echo -e "  ${DIM}${masked}${RESET}"
         echo -e "  ${DIM}Action: Remove the secret and rotate it immediately.${RESET}"
         echo ""
@@ -433,7 +511,7 @@ scan_large_files() {
   print_info "Checking for large files..."
 
   local files
-  files=$(git diff --name-only --diff-filter=ACMR "${range}" 2>/dev/null || true)
+  files=$(git -c core.quotePath=false diff --name-only --diff-filter=ACMR "${range}" 2>/dev/null || true)
 
   if [[ -z "${files}" ]]; then
     print_debug "No files to check."
@@ -441,14 +519,16 @@ scan_large_files() {
   fi
 
   local found_large=0
+  # Measure the blob in the commit being pushed, not the working-tree file.
+  # 'wc -c < file' measured whatever was checked out, so pushing another branch
+  # sized the wrong content and a file deleted locally was skipped entirely.
+  local to_ref="${range##*..}"
 
   while IFS= read -r file; do
     [[ -z "${file}" ]] && continue
-    [[ ! -f "${file}" ]] && continue
 
     local file_size
-    file_size=$(wc -c < "${file}" 2>/dev/null || echo "0")
-    file_size=$(echo "${file_size}" | tr -d ' ')
+    file_size=$(git cat-file -s "${to_ref}:${file}" 2>/dev/null || echo "0")
 
     if [[ "${file_size}" -gt "${MAX_FILE_SIZE}" ]]; then
       local human_size
@@ -542,6 +622,25 @@ scan_dependencies() {
 
 # --- Main ---
 
+# Run every scan against one <base>..<tip> range
+scan_range() {
+  local range="$1"
+
+  print_info "Scanning commits: ${range}"
+  echo ""
+
+  scan_secrets_in_range "${range}"
+  echo ""
+
+  scan_large_files "${range}"
+  echo ""
+
+  if [[ "${DRY_RUN}" != "1" ]]; then
+    scan_dependencies
+    echo ""
+  fi
+}
+
 main() {
   print_header
   load_config
@@ -599,21 +698,20 @@ main() {
       range="${remote_sha}..${local_sha}"
     fi
 
-    print_info "Scanning commits: ${range}"
-    echo ""
-
-    # Run scans
-    scan_secrets_in_range "${range}"
-    echo ""
-
-    scan_large_files "${range}"
-    echo ""
-
-    if [[ "${DRY_RUN}" != "1" ]]; then
-      scan_dependencies
-      echo ""
-    fi
+    scan_range "${range}"
   done
+
+  # Run by the pre-commit framework (https://pre-commit.com). It reads git's
+  # ref lines itself and hands the hook the range as environment variables.
+  # When the push includes the root commit it sets no range at all, only the
+  # local branch, so scan that branch from the empty tree.
+  if [[ "${has_input}" -eq 0 ]] && [[ -n "${PRE_COMMIT_TO_REF:-}" ]]; then
+    has_input=1
+    scan_range "${PRE_COMMIT_FROM_REF:-$(git hash-object -t tree /dev/null)}..${PRE_COMMIT_TO_REF}"
+  elif [[ "${has_input}" -eq 0 ]] && [[ -n "${PRE_COMMIT_REMOTE_NAME:-}" ]]; then
+    has_input=1
+    scan_range "$(git hash-object -t tree /dev/null)..${PRE_COMMIT_LOCAL_BRANCH:-HEAD}"
+  fi
 
   # If no input from stdin (e.g., running manually), scan working tree
   if [[ "${has_input}" -eq 0 ]]; then

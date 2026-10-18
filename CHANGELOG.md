@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.2.0] - 2026-10-18
+
+- Add a `.pre-commit-hooks.yaml` manifest, so the four hooks install through the pre-commit framework (`ai-review`, `ai-commit-message`, `commit-msg-validate`, `secret-scan`). Under pre-commit, the pre-push scan reads its range from `PRE_COMMIT_FROM_REF` / `PRE_COMMIT_TO_REF`, or scans the whole branch from `PRE_COMMIT_LOCAL_BRANCH` when the push includes the root commit, and prepare-commit-msg reads `PRE_COMMIT_COMMIT_MSG_SOURCE`, so `git commit -m` messages are left alone. Checked end to end with pre-commit 4.7.0: a bad message is rejected, and both a first push and a new-branch push with a key are blocked
+- Add `scripts/get.sh`, a one-line installer: `curl -fsSL .../scripts/get.sh | bash` clones or updates `~/.ai-git-hooks` and runs `install.sh` for the current project. It refuses to run outside a git repository before cloning anything
+- Add `scripts/benchmark.sh` and [docs/benchmark.md](docs/benchmark.md): the pre-push scan and gitleaks scored on the leaky-repo corpus with leaky-repo's own method, plus a noise check on express, requests, flask and react-hook-form at pinned tags
+- Widen the secret patterns from 31 to 40, driven by that benchmark, which took the scan from 5 to 34 of 175 corpus lines (21 of 44 files, 0 false positives). Quoted `password` / `secret` / `api_key` / token values now match with `:` as well as `=` and with a quoted key, so JSON and YAML configs are scanned. New rules: PEM private keys of any type, PuTTY keys, credentials in http/ftp/smtp/imap/amqp URLs, npm `_authToken` and `_auth`, Docker registry `auth`, `.netrc` logins, Laravel `APP_KEY`, crypt and bcrypt password hashes, and `oauth_token`. URL and `.netrc` passwords need 6+ characters and the npm keys must start a line, which cut the noise on requests from 31 findings to 10
+- Report every secret finding as `file:line`, with the line number in the pushed file. Before, the scan printed only the pattern name and the masked line
+- Fix the pre-push scan skipping files with non-ASCII names. git listed them as quoted octal escapes, which then matched nothing as a pathspec, so a key in a file named with an accented or CJK character passed with "All checks passed". The file lists are now read with `core.quotePath=false`
+- Measure large files from the pushed blob (`git cat-file -s`) instead of the working-tree copy, which sized the wrong content when pushing another branch and skipped files deleted locally
+- Fix the pre-commit review passing a reply that listed `ERROR` lines and also contained `NO_ISSUES`. It now counts as clean only when no finding line is present
+- Add `AI_HOOKS_MOCK_RESPONSE`, which replaces the dry-run stand-in reply so the test suite can feed the review parser real findings
+- Add `scripts/demo.sh`, which runs the hooks in a throwaway repo in dry-run mode, and an animated terminal demo in the README rendered from its output
+- Add 21 tests (47 to 68): the first-push and new-branch pre-push paths, `sk-proj-` keys, `file:line` reporting, non-ASCII file names, blob-size measurement, both pre-commit framework ranges, the new patterns and their look-alikes, the review parser on findings, the `PRE_COMMIT_COMMIT_MSG_SOURCE` skip, `get.sh`, and the manifest entries. CI now also validates the manifest and runs the demo
+- README: a Why this one section, the three install paths, the real pre-push output with `file:line`, the full pattern list, and the benchmark headline
+
 ## [1.1.0] - 2026-10-18
 
 - Fix the pre-push scan passing the first push of a repo with a secret in it. A new branch with no upstream got the range `<sha>~10..<sha>`, which does not exist in a repo with fewer than 11 commits, so `git diff` failed silently, nothing was scanned and the hook printed "All checks passed". On longer histories it scanned the last 10 commits of `HEAD` rather than the branch being pushed. The range now starts where the pushed commits leave remote history, or at the empty tree when nothing is on a remote yet

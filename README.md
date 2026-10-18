@@ -10,6 +10,29 @@
 
 Drop-in git hooks that use AI (Claude, OpenAI, Ollama) to automate code quality checks at every stage of your git workflow.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/demo/demo-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/demo/demo-light.svg">
+  <img alt="Terminal demo: a vague commit message is rejected, a plain git commit gets a generated conventional message, and a push carrying an AWS key is blocked at config.js:3" src="docs/demo/demo-dark.svg" width="100%">
+</picture>
+
+The output above is from [`scripts/demo.sh`](scripts/demo.sh), which runs the
+real hooks in a throwaway repo with no API key. It runs in dry-run mode, so the
+review and the generated message are the fixed stand-in replies; the validator
+and the secret scan make no AI call and print exactly what a real run prints.
+Try it: `git clone https://github.com/Sagargupta16/ai-git-hooks.git && ./ai-git-hooks/scripts/demo.sh`.
+
+## Why this one
+
+- **One install, four gates.** Review, message, message validation and a secret
+  scan, from a single clone, one installer or one `.pre-commit-config.yaml`.
+- **No runtime to install.** Bash, `git`, `curl` and `jq`. No Node, no Python,
+  no daemon.
+- **The blocking push gate is not AI.** The secret scan is regex, so it gives
+  the same answer every time, and it is measured: see the
+  [benchmark](docs/benchmark.md).
+- **Local models work.** Point it at Ollama and no diff leaves your machine.
+
 ## Hooks
 
 | Hook | Description | Trigger |
@@ -56,8 +79,9 @@ Design decisions worth knowing:
   `commit-msg` enforces, and the validator accepts that prefix, so the two
   default-enabled hooks never reject each other's output.
 - **Every provider call is optional in CI.** `AI_HOOKS_DRY_RUN=1` replaces each
-  call with a fixed response, so the 47-case suite in `scripts/test.sh` runs on
-  ubuntu and macOS with no API key.
+  call with a fixed response, so the 68-case suite in `scripts/test.sh` runs on
+  ubuntu and macOS with no API key. `AI_HOOKS_MOCK_RESPONSE` swaps in a
+  provider reply, which is how the suite tests the review parser on findings.
 
 ## Requirements
 
@@ -68,22 +92,52 @@ Design decisions worth knowing:
 | `curl` | Used for every provider API call |
 | `jq` | Required. Hooks refuse to call a provider without it: `brew install jq` / `apt install jq` |
 
-There is no npm package - install by cloning, as below.
+There is no npm package. Install with the one-line script, through the
+pre-commit framework, or from a clone; all three run the same four scripts.
 
 ## Quick Start
 
-### 1. Clone this repo
+### 1. Install
 
-Clone it somewhere permanent. This directory is the source of the hooks, not the
-project they run in.
+**One line.** From the root of your project:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Sagargupta16/ai-git-hooks/main/scripts/get.sh | bash
+```
+
+[`get.sh`](scripts/get.sh) clones this repo to `~/.ai-git-hooks` (or updates
+that clone if it exists) and runs the installer below for the current project.
+It stops before cloning anything if you are not inside a git repository.
+`AI_GIT_HOOKS_HOME` changes where the clone goes and `AI_GIT_HOOKS_REF` pins a
+branch or tag. Running it again in another project reuses the clone.
+
+**With the [pre-commit](https://pre-commit.com) framework.** Add the hooks to
+`.pre-commit-config.yaml`:
+
+```yaml
+default_install_hook_types: [pre-commit, prepare-commit-msg, commit-msg, pre-push]
+repos:
+  - repo: https://github.com/Sagargupta16/ai-git-hooks
+    rev: v1.2.0
+    hooks:
+      - id: ai-review            # pre-commit: AI code review
+      - id: ai-commit-message    # prepare-commit-msg: generated message
+      - id: commit-msg-validate  # commit-msg: conventional commit check
+      - id: secret-scan          # pre-push: secret and large-file scan
+```
+
+Then run `pre-commit install`. Keep only the ids you want. The hooks read
+`.ai-hooks.yml` from your project root as usual; copy
+[`.ai-hooks.example.yml`](.ai-hooks.example.yml) there to configure them, or
+they run on built-in defaults. Under pre-commit the pre-push scan takes its
+range from `PRE_COMMIT_FROM_REF` / `PRE_COMMIT_TO_REF`, so it scans the same
+commits as a directly installed hook.
+
+**From a clone.** Clone it somewhere permanent. This directory is the source of
+the hooks, not the project they run in.
 
 ```bash
 git clone https://github.com/Sagargupta16/ai-git-hooks.git ~/tools/ai-git-hooks
-```
-
-### 2. Install into your project
-
-```bash
 cd /path/to/your-project
 ~/tools/ai-git-hooks/scripts/install.sh ~/tools/ai-git-hooks
 ```
@@ -99,7 +153,7 @@ own hook files (backed up as `<hook>.backup`), and the next `husky` run
 regenerates them and drops the AI hooks. Call the hook scripts from your husky
 hooks instead.
 
-### 3. Configure
+### 2. Configure
 
 The installer seeds `.ai-hooks.yml` in your project root. The keys that matter:
 
@@ -134,7 +188,7 @@ hooks:
     max_file_size: 5MB
 ```
 
-### 4. Set your API key
+### 3. Set your API key
 
 ```bash
 # Claude (recommended)
@@ -227,7 +281,7 @@ is not in the net diff, so it is not caught.
 
 ```
 [INFO] Scanning for secrets...
-[CRITICAL] Possible Anthropic API Key found
+[CRITICAL] Possible Anthropic API Key found in src/config.js:8
   const API_KEY = "***REDACTED***";
   Action: Remove the secret and rotate it immediately.
 
@@ -243,11 +297,28 @@ Scan complete: 1 critical, 1 warning(s), 0 info
 [INFO] Fix the issues above or use 'git push --no-verify' to bypass.
 ```
 
-Built-in patterns cover AWS, GitHub (classic and fine-grained), Anthropic,
+Each finding names the file and the line in that file. The size check reads
+the blob in the pushed commit (`git cat-file -s`), so it sees what is being
+pushed even when the file has since changed or been deleted locally.
+
+Built-in patterns (40) cover AWS, GitHub (classic and fine-grained), Anthropic,
 OpenAI (legacy and `sk-proj-` / `sk-svcacct-` / `sk-admin-`), Google, Slack,
-Stripe, Twilio and SendGrid keys, PEM private keys, database connection strings
-with an inline password, and quoted `password` / `secret` / `api_key` /
-`access_token` / `auth_token` assignments. The matched value is redacted before it is printed.
+Stripe, Twilio and SendGrid keys; PEM private keys of any type and PuTTY `.ppk`
+keys; database connection strings and web, FTP and mail URLs with an inline
+password; npm `_authToken` / `_auth`, Docker registry `auth`, `.netrc` logins
+and Laravel `APP_KEY`; Unix crypt and bcrypt password hashes; and quoted
+`password` / `secret` / `api_key` / `access_token` / `auth_token` /
+`oauth_token` values assigned with `=` or `:` (so JSON and YAML configs count).
+The matched value is redacted before it is printed. Unquoted `.env` lines such
+as `DB_PASSWORD=admin123` are not matched.
+
+**How well does it work?** Against the [leaky-repo](https://github.com/Plazmaz/leaky-repo)
+corpus of fake credentials, the scan flags 34 of 175 credential lines in 21 of
+44 files with 0 false positives, against 22 lines in 13 files for gitleaks
+8.30.1 on its default rules. gitleaks still covers far more token formats (222
+rules), so treat this hook as a zero-dependency push gate, not a replacement.
+Methods, a noise check on four clean projects and the per-file table are in
+[docs/benchmark.md](docs/benchmark.md); rerun it with `./scripts/benchmark.sh --gitleaks --noise`.
 
 ## What Runs On Every Commit
 
@@ -303,9 +374,12 @@ config reader takes the first match for a top-level key, so an appended
 
 | Script | Description |
 |--------|-------------|
+| [`get.sh`](scripts/get.sh) | One-line install: clone or update `~/.ai-git-hooks`, then run `install.sh` here |
 | [`install.sh`](scripts/install.sh) | Install hooks to your git project |
 | [`uninstall.sh`](scripts/uninstall.sh) | Remove hooks from your project |
 | [`test.sh`](scripts/test.sh) | Test hooks against sample diffs |
+| [`demo.sh`](scripts/demo.sh) | Run the hooks in a throwaway repo, no API key needed |
+| [`benchmark.sh`](scripts/benchmark.sh) | Score the secret scan (and optionally gitleaks) on the leaky-repo corpus |
 
 ## Troubleshooting
 

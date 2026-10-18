@@ -197,6 +197,15 @@ fake_aws_key() {
   echo "AKIA""IOSFODNN7EXAMPLE"
 }
 
+# Same idea for a classic GitHub token and a current OpenAI project key
+fake_github_token() {
+  echo "ghp_""abcdefghijklmnopqrstuvwxyz0123456789"
+}
+
+fake_openai_project_key() {
+  echo "sk-""proj-Ab3_xY9-kL2mN8pQ4rS6tU1v"
+}
+
 # --- Pre-Commit Tests ---
 
 test_pre_commit() {
@@ -304,6 +313,36 @@ PROBE_EOF
   fi
   cleanup_test_repo
 
+  # Test: a provider reply with findings is parsed and the block decision made.
+  # AI_HOOKS_MOCK_RESPONSE stands in for the provider, so this runs the real
+  # parser on a reply in the line protocol without an API key.
+  setup_test_repo
+  stage_file "users.js" "db.query('SELECT * FROM users WHERE id = ' + id);"
+  if output=$(AI_HOOKS_MOCK_RESPONSE="ERROR|users.js:1|SQL built by string concatenation|Use a parameterized query
+WARNING|users.js:1|id is not validated|Check it is an integer" bash "${hook}" 2>&1); then
+    fail "Findings: an ERROR line should block at severity error" "$(echo "${output}" | tail -3)"
+  elif echo "${output}" | grep -q "1 error(s).*1 warning(s)"; then
+    pass "Findings: ERROR and WARNING lines counted, commit blocked at severity error"
+  else
+    fail "Findings: blocked, but the summary did not count 1 error and 1 warning" "$(echo "${output}" | tail -3)"
+  fi
+  cleanup_test_repo
+
+  # Test: a reply that lists an ERROR and then also says NO_ISSUES still blocks.
+  # The clean check used to match the token anywhere and returned before any
+  # finding line was read.
+  setup_test_repo
+  stage_file "auth.js" "if (token = expected) { allow(); }"
+  if output=$(AI_HOOKS_MOCK_RESPONSE="ERROR|auth.js:1|Assignment instead of comparison|Use ===
+NO_ISSUES otherwise" bash "${hook}" 2>&1); then
+    fail "NO_ISSUES with findings: the ERROR line must still block" "$(echo "${output}" | tail -3)"
+  elif echo "${output}" | grep -q "Commit blocked"; then
+    pass "NO_ISSUES with findings: ERROR line still blocks the commit"
+  else
+    fail "NO_ISSUES with findings: exited non-zero without a block message" "$(echo "${output}" | tail -3)"
+  fi
+  cleanup_test_repo
+
   # Test: Script handles missing jq gracefully (we can't easily test this
   # without removing jq, so we just verify the check exists in the script)
   if grep -q "command -v jq" "${hook}"; then
@@ -404,6 +443,25 @@ test_prepare_commit_msg() {
     fi
   else
     fail "Length budget: generator should still write a message" "$(echo "${output}" | tail -3)"
+  fi
+  rm -f "${msg_file}"
+  cleanup_test_repo
+
+  # Test: under the pre-commit framework the hook gets only the message file,
+  # and the source arrives in PRE_COMMIT_COMMIT_MSG_SOURCE. A `git commit -m`
+  # message must survive untouched, as it does when git passes $2.
+  setup_test_repo
+  stage_file "framework.js" "const z = 3;"
+  msg_file=$(mktemp)
+  echo "fix: keep my message" > "${msg_file}"
+  if output=$(PRE_COMMIT_COMMIT_MSG_SOURCE="message" bash "${hook}" "${msg_file}" 2>&1); then
+    if [[ "$(head -1 "${msg_file}")" == "fix: keep my message" ]]; then
+      pass "pre-commit framework: -m message kept when the source comes from the environment"
+    else
+      fail "pre-commit framework: -m message was overwritten with '$(head -1 "${msg_file}")'"
+    fi
+  else
+    fail "pre-commit framework: should exit 0" "$(echo "${output}" | tail -3)"
   fi
   rm -f "${msg_file}"
   cleanup_test_repo
@@ -756,6 +814,194 @@ PROBE_EOF
     fail "No push data: should exit 0 on a clean repo" "$(echo "${output}" | tail -3)"
   fi
   cleanup_test_repo
+
+  local zero_sha="0000000000000000000000000000000000000000"
+  local branch_ref sha
+
+  # Test: the first push of a repo (remote sha all zeros, nothing on any
+  # remote) scans every pushed commit. The range used to be <sha>~10..<sha>,
+  # which does not exist in a short history, so this push passed with a key.
+  setup_test_repo
+  branch_ref="refs/heads/$(git rev-parse --abbrev-ref HEAD)"
+  commit_and_ref_line "keys.js" "const k = '$(fake_aws_key)';" >/dev/null
+  commit_and_ref_line "later.js" "const fine = 1;" >/dev/null
+  sha=$(git rev-parse HEAD)
+  if output=$(echo "${branch_ref} ${sha} ${branch_ref} ${zero_sha}" | bash "${hook}" 2>&1); then
+    fail "First push: a key two commits back should block" "$(echo "${output}" | tail -3)"
+  elif echo "${output}" | grep -q "CRITICAL.*keys.js:1"; then
+    pass "First push: key in an earlier commit found at keys.js:1, push blocked"
+  else
+    fail "First push: blocked, but the finding did not name keys.js:1" "$(echo "${output}" | tail -5)"
+  fi
+  cleanup_test_repo
+
+  # Test: a new branch pushed to an existing remote scans only its own
+  # commits. A key already on the remote's main is not reported again, and a
+  # key added on the branch is.
+  setup_test_repo
+  local remote_dir
+  remote_dir=$(mktemp -d 2>/dev/null || mktemp -d -t 'ai-hooks-remote')
+  git init --quiet --bare "${remote_dir}"
+  git remote add origin "${remote_dir}"
+  commit_and_ref_line "old.js" "const k = '$(fake_aws_key)';" >/dev/null
+  git push --quiet --no-verify origin HEAD 2>/dev/null
+  git checkout --quiet -b feature/clean
+  commit_and_ref_line "clean.js" "const fine = 1;" >/dev/null
+  sha=$(git rev-parse HEAD)
+  if output=$(echo "refs/heads/feature/clean ${sha} refs/heads/feature/clean ${zero_sha}" | bash "${hook}" 2>&1); then
+    pass "New branch: a key already on the remote is not re-reported"
+  else
+    fail "New branch: only clean.js is new, but the push was blocked" "$(echo "${output}" | tail -5)"
+  fi
+  commit_and_ref_line "new.js" "token = '$(fake_github_token)'" >/dev/null
+  sha=$(git rev-parse HEAD)
+  if output=$(echo "refs/heads/feature/clean ${sha} refs/heads/feature/clean ${zero_sha}" | bash "${hook}" 2>&1); then
+    fail "New branch: a GitHub token added on the branch should block" "$(echo "${output}" | tail -3)"
+  elif echo "${output}" | grep -q "CRITICAL.*new.js:1" && ! echo "${output}" | grep -q "old.js"; then
+    pass "New branch: token on the branch found at new.js:1, main's history not rescanned"
+  else
+    fail "New branch: blocked, but the findings were not exactly new.js:1" "$(echo "${output}" | tail -5)"
+  fi
+  rm -rf "${remote_dir}"
+  cleanup_test_repo
+
+  # Test: current OpenAI key shapes (sk-proj-, with '-' and '_') are detected
+  setup_test_repo
+  ref_line=$(commit_and_ref_line "openai.py" "OPENAI_API_KEY = '$(fake_openai_project_key)'")
+  if output=$(echo "${ref_line}" | bash "${hook}" 2>&1); then
+    fail "OpenAI project key: an sk-proj- key should block" "$(echo "${output}" | tail -3)"
+  elif echo "${output}" | grep -q "OpenAI Project/Service Key found in openai.py:1"; then
+    pass "OpenAI project key: sk-proj- key detected at openai.py:1"
+  else
+    fail "OpenAI project key: blocked, but not as an OpenAI project key" "$(echo "${output}" | tail -5)"
+  fi
+  cleanup_test_repo
+
+  # Test: config-file credential shapes added from the benchmark are detected.
+  # Values are split so this file does not match the patterns itself.
+  local entry case_file case_text case_name
+  local -a pattern_cases=(
+    "deploy.json|  \"pass""word\": \"hunter2""hunter2\",|Hardcoded Password"
+    "git-credentials|https://octo:s3cret""pass@github.com|Password in URL"
+    "npmrc|//registry.npmjs.org/:_auth""Token=npm_abcdef""1234567890|npm Auth Token"
+    "key.ppk|PuTTY-User-""Key-File-2: ssh-rsa|PuTTY Private Key File"
+  )
+  for entry in "${pattern_cases[@]}"; do
+    case_file="${entry%%|*}"
+    case_text="${entry#*|}"
+    case_name="${case_text##*|}"
+    case_text="${case_text%|*}"
+    setup_test_repo
+    ref_line=$(commit_and_ref_line "${case_file}" "${case_text}")
+    if output=$(echo "${ref_line}" | bash "${hook}" 2>&1); then
+      fail "Pattern: ${case_name} in ${case_file} should block" "$(echo "${output}" | tail -3)"
+    elif echo "${output}" | grep -q "${case_name} found in ${case_file}:1"; then
+      pass "Pattern: ${case_name} detected in ${case_file}"
+    else
+      fail "Pattern: blocked, but not as ${case_name}" "$(echo "${output}" | grep CRITICAL)"
+    fi
+    cleanup_test_repo
+  done
+
+  # Test: the look-alikes the noise benchmark turned up stay quiet: placeholder
+  # proxy credentials, template URLs, and code that merely ends in '_auth'
+  setup_test_repo
+  ref_line=$(commit_and_ref_line "client.py" "proxy = 'http://user:pass@proxy:8080'
+url = f'http://{USER}:{PASSWORD}@example.com/'
+old_auth = requests.sessions.get_netrc_auth
+this._authToken = options.token")
+  if output=$(echo "${ref_line}" | bash "${hook}" 2>&1); then
+    pass "Look-alikes: placeholder URL credentials and *_auth code are not flagged"
+  else
+    fail "Look-alikes: should not block" "$(echo "${output}" | grep CRITICAL)"
+  fi
+  cleanup_test_repo
+
+  # Test: the reported line number is the line in the file, not in the diff
+  setup_test_repo
+  ref_line=$(commit_and_ref_line "settings.py" "DEBUG = False
+ALLOWED_HOSTS = []
+AWS_ACCESS_KEY_ID = '$(fake_aws_key)'")
+  if output=$(echo "${ref_line}" | bash "${hook}" 2>&1); then
+    fail "Line numbers: the key on line 3 should block" "$(echo "${output}" | tail -3)"
+  elif echo "${output}" | grep -q "found in settings.py:3"; then
+    pass "Line numbers: key reported at settings.py:3"
+  else
+    fail "Line numbers: expected settings.py:3" "$(echo "${output}" | grep CRITICAL)"
+  fi
+  cleanup_test_repo
+
+  # Test: a non-ASCII file name is still scanned. git quotes such paths as
+  # octal escapes by default, so they did not work as pathspecs and the file
+  # was silently left out. A CJK name has no Unicode decomposition, so macOS
+  # file systems cannot rewrite it.
+  setup_test_repo
+  local cjk_name
+  cjk_name="$(printf '\346\227\245').txt"
+  ref_line=$(commit_and_ref_line "${cjk_name}" "key = '$(fake_aws_key)'")
+  if output=$(echo "${ref_line}" | bash "${hook}" 2>&1); then
+    fail "Non-ASCII path: a key in ${cjk_name} should block" "$(echo "${output}" | tail -3)"
+  elif echo "${output}" | grep -q "found in ${cjk_name}:1"; then
+    pass "Non-ASCII path: key in a non-ASCII file name found and blocked"
+  else
+    fail "Non-ASCII path: blocked without naming the file" "$(echo "${output}" | grep CRITICAL)"
+  fi
+  cleanup_test_repo
+
+  # Test: the size check measures the pushed blob. The working-tree copy is
+  # deleted here, which the old 'wc -c < file' check skipped entirely.
+  setup_test_repo
+  cat > .ai-hooks.yml <<'PROBE_EOF'
+hooks:
+  pre-push:
+    enabled: true
+    scan_secrets: true
+    max_file_size: 1KB
+PROBE_EOF
+  ref_line=$(commit_and_ref_line "big.txt" "$(head -c 2048 /dev/zero | tr '\0' 'a')")
+  rm -f big.txt
+  if output=$(echo "${ref_line}" | bash "${hook}" 2>&1); then
+    if echo "${output}" | grep -q "Large file detected: big.txt (2 KB)"; then
+      pass "Large file: 2 KB blob reported from the commit though the file is gone locally"
+    else
+      fail "Large file: expected 'big.txt (2 KB)'" "$(echo "${output}" | tail -5)"
+    fi
+  else
+    fail "Large file: a size warning should not block the push" "$(echo "${output}" | tail -3)"
+  fi
+  cleanup_test_repo
+
+  # Test: under the pre-commit framework the range arrives as
+  # PRE_COMMIT_FROM_REF / PRE_COMMIT_TO_REF, with nothing on stdin
+  setup_test_repo
+  local from_sha
+  from_sha=$(git rev-parse HEAD)
+  commit_and_ref_line "fw.js" "const k = '$(fake_aws_key)';" >/dev/null
+  if output=$(PRE_COMMIT_FROM_REF="${from_sha}" PRE_COMMIT_TO_REF="$(git rev-parse HEAD)" \
+      PRE_COMMIT_REMOTE_NAME="origin" bash "${hook}" < /dev/null 2>&1); then
+    fail "pre-commit framework: a key in the FROM..TO range should block" "$(echo "${output}" | tail -3)"
+  elif echo "${output}" | grep -q "CRITICAL.*fw.js:1"; then
+    pass "pre-commit framework: range read from PRE_COMMIT_FROM_REF/TO_REF, key blocked"
+  else
+    fail "pre-commit framework: blocked without naming fw.js:1" "$(echo "${output}" | tail -5)"
+  fi
+  cleanup_test_repo
+
+  # Test: when the push includes the root commit, pre-commit sets no range,
+  # only the remote and the local branch. The whole branch is scanned.
+  setup_test_repo
+  branch_ref="refs/heads/$(git rev-parse --abbrev-ref HEAD)"
+  commit_and_ref_line "root.js" "const k = '$(fake_aws_key)';" >/dev/null
+  commit_and_ref_line "after.js" "const fine = 1;" >/dev/null
+  if output=$(PRE_COMMIT_REMOTE_NAME="origin" PRE_COMMIT_LOCAL_BRANCH="${branch_ref}" \
+      bash "${hook}" < /dev/null 2>&1); then
+    fail "pre-commit framework first push: the key should block" "$(echo "${output}" | tail -3)"
+  elif echo "${output}" | grep -q "CRITICAL.*root.js:1"; then
+    pass "pre-commit framework first push: whole branch scanned, key blocked"
+  else
+    fail "pre-commit framework first push: blocked without naming root.js:1" "$(echo "${output}" | tail -5)"
+  fi
+  cleanup_test_repo
 }
 
 # --- Install/Uninstall Tests ---
@@ -835,6 +1081,55 @@ test_install() {
   fi
 
   cleanup_test_repo
+
+  # Test: the one-line installer clones the repo and installs into the project
+  # it is run from. AI_GIT_HOOKS_REPO points it at a local snapshot of this
+  # checkout, so the test needs no network and covers uncommitted changes.
+  local get_script="${REPO_ROOT}/scripts/get.sh"
+  local source_repo tool_home
+  source_repo=$(mktemp -d 2>/dev/null || mktemp -d -t 'ai-hooks-src')
+  tool_home="${source_repo}-home"
+  cp -R "${REPO_ROOT}/hooks" "${REPO_ROOT}/scripts" "${REPO_ROOT}/.ai-hooks.example.yml" "${source_repo}/"
+  git -C "${source_repo}" init --quiet
+  git -C "${source_repo}" add -A
+  git -C "${source_repo}" -c user.email=t@example.com -c user.name=T commit --quiet -m snapshot
+
+  setup_test_repo
+  if output=$(AI_GIT_HOOKS_REPO="${source_repo}" AI_GIT_HOOKS_HOME="${tool_home}" bash "${get_script}" 2>&1); then
+    local got=0
+    for hook_name in pre-commit prepare-commit-msg commit-msg pre-push; do
+      [[ -x "${TEST_DIR}/.git/hooks/${hook_name}" ]] && got=$((got + 1))
+    done
+    if [[ "${got}" -eq 4 ]] && [[ -d "${tool_home}/.git" ]]; then
+      pass "get.sh: cloned to AI_GIT_HOOKS_HOME and installed all 4 hooks"
+    else
+      fail "get.sh: ${got}/4 hooks installed"
+    fi
+  else
+    fail "get.sh: exited with error" "$(echo "${output}" | tail -3)"
+  fi
+
+  # A second run updates the existing clone instead of failing on it
+  if output=$(AI_GIT_HOOKS_REPO="${source_repo}" AI_GIT_HOOKS_HOME="${tool_home}" bash "${get_script}" 2>&1) \
+      && echo "${output}" | grep -q "Updating"; then
+    pass "get.sh: re-run updates the existing clone"
+  else
+    fail "get.sh: re-run should update the clone" "$(echo "${output}" | tail -3)"
+  fi
+  cleanup_test_repo
+
+  # Outside a git repository it stops before cloning anything
+  local not_a_repo
+  not_a_repo=$(mktemp -d 2>/dev/null || mktemp -d -t 'ai-hooks-norepo')
+  if output=$(cd "${not_a_repo}" && GIT_CEILING_DIRECTORIES="${not_a_repo%/*}" \
+      AI_GIT_HOOKS_REPO="${source_repo}" AI_GIT_HOOKS_HOME="${not_a_repo}/home" bash "${get_script}" 2>&1); then
+    fail "get.sh: should refuse to run outside a git repository"
+  elif echo "${output}" | grep -q "Not inside a git repository" && [[ ! -e "${not_a_repo}/home" ]]; then
+    pass "get.sh: refuses outside a git repository without cloning"
+  else
+    fail "get.sh: wrong failure outside a git repository" "$(echo "${output}" | tail -3)"
+  fi
+  rm -rf "${source_repo}" "${tool_home}" "${not_a_repo}"
 }
 
 # --- Config File Tests ---
@@ -881,6 +1176,23 @@ test_config() {
     pass "Config: pre-push section present"
   else
     fail "Config: missing pre-push section"
+  fi
+
+  # Test: every entry in the pre-commit framework manifest is a script that
+  # exists and is executable, one per hook in hooks/
+  local manifest="${REPO_ROOT}/.pre-commit-hooks.yaml"
+  local entries entry missing=0 entry_count=0 hook_count
+  entries=$(grep '^ *entry:' "${manifest}" 2>/dev/null | sed 's/^ *entry: *//' || true)
+  while IFS= read -r entry; do
+    [[ -z "${entry}" ]] && continue
+    entry_count=$((entry_count + 1))
+    [[ -x "${REPO_ROOT}/${entry}" ]] || missing=$((missing + 1))
+  done <<< "${entries}"
+  hook_count=$(find "${REPO_ROOT}/hooks" -name '*.sh' | wc -l | tr -d ' ')
+  if [[ "${entry_count}" -eq "${hook_count}" ]] && [[ "${missing}" -eq 0 ]]; then
+    pass "pre-commit manifest: ${entry_count} entries, all executable hook scripts"
+  else
+    fail "pre-commit manifest: ${entry_count} entries for ${hook_count} hooks, ${missing} missing or not executable"
   fi
 }
 
