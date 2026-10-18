@@ -50,7 +50,9 @@ main() {
 
   if [[ -d "${home}/.git" ]]; then
     print_info "Updating ${home}"
-    git -C "${home}" fetch --quiet --depth 1 origin ${ref:+"${ref}"}
+    # HEAD, not the clone's refspec, so a clone first made from a tag still
+    # follows the default branch once AI_GIT_HOOKS_REF is unset
+    git -C "${home}" fetch --quiet --depth 1 origin "${ref:-HEAD}"
     git -C "${home}" -c advice.detachedHead=false checkout --quiet --detach FETCH_HEAD
   elif [[ -e "${home}" ]]; then
     print_error "${home} exists but is not a git clone of ai-git-hooks."

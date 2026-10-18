@@ -60,8 +60,8 @@ main() {
   WORK_DIR=$(mktemp -d 2>/dev/null || mktemp -d -t 'ai-hooks-demo')
   trap cleanup EXIT
 
-  git init --quiet --bare "${WORK_DIR}/remote.git"
-  git init --quiet "${WORK_DIR}/app"
+  git init --quiet --bare -b main "${WORK_DIR}/remote.git"
+  git init --quiet -b main "${WORK_DIR}/app"
   cd "${WORK_DIR}/app"
   git config user.email "demo@example.com"
   git config user.name "Demo"
