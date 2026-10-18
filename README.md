@@ -63,7 +63,7 @@ Design decisions worth knowing:
 
 | Requirement | Notes |
 |-------------|-------|
-| `git` | The hooks read the staged diff and the branch name |
+| `git` 2.31+ | The hooks read the staged diff and the branch name. The installer uses `rev-parse --path-format=absolute` |
 | `bash` | Every hook and script uses `#!/usr/bin/env bash`. CI runs the suite on ubuntu-latest and macos-latest |
 | `curl` | Used for every provider API call |
 | `jq` | Required. Hooks refuse to call a provider without it: `brew install jq` / `apt install jq` |
@@ -91,8 +91,13 @@ cd /path/to/your-project
 The installer copies the four hooks into the hooks directory git reports for
 your project (`git rev-parse --git-path hooks`, normally `.git/hooks/`) and
 creates `.ai-hooks.yml` at the project root. Linked worktrees, submodules and a
-`core.hooksPath` setting (husky and similar) all resolve to the directory git
-actually runs. Run it once per project you want the hooks in.
+`core.hooksPath` setting all resolve to the directory git actually runs. Run it
+once per project you want the hooks in.
+
+If the project uses husky, do not run the installer: it would replace husky's
+own hook files (backed up as `<hook>.backup`), and the next `husky` run
+regenerates them and drops the AI hooks. Call the hook scripts from your husky
+hooks instead.
 
 ### 3. Configure
 
@@ -215,9 +220,10 @@ only asked for the suggested rewrite.
 
 ### Pre-Push: Security Scan
 
-Scans the changes in the commits about to be pushed. For a new branch that is
+Scans the net diff of the commits about to be pushed. For a new branch that is
 everything not already on a remote; for the first push of a repo it is every
-file.
+file. A secret added in one commit and deleted in a later one in the same push
+is not in the net diff, so it is not caught.
 
 ```
 [INFO] Scanning for secrets...
@@ -241,7 +247,7 @@ Built-in patterns cover AWS, GitHub (classic and fine-grained), Anthropic,
 OpenAI (legacy and `sk-proj-` / `sk-svcacct-` / `sk-admin-`), Google, Slack,
 Stripe, Twilio and SendGrid keys, PEM private keys, database connection strings
 with an inline password, and quoted `password` / `secret` / `api_key` /
-`token` assignments. The matched value is redacted before it is printed.
+`access_token` / `auth_token` assignments. The matched value is redacted before it is printed.
 
 ## What Runs On Every Commit
 
