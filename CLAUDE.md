@@ -59,7 +59,8 @@ shellcheck -x hooks/**/*.sh scripts/*.sh   # lint (CI-gated)
 ## Install              (CLI / tool)
 
 - Clone somewhere permanent, then from the target project root: `/path/to/ai-git-hooks/scripts/install.sh /path/to/ai-git-hooks`
-- `install.sh` sets `TARGET_DIR="$(pwd)"`, so running it from inside the ai-git-hooks clone installs the hooks into the clone and leaves the user's project untouched
+- `install.sh` resolves the target from the current directory (`git rev-parse --show-toplevel`, hooks dir from `--git-path hooks`), so running it from inside the ai-git-hooks clone installs the hooks into the clone and leaves the user's project untouched
+- The pre-push new-branch path (remote sha all zeros) is not covered by `scripts/test.sh`, which only feeds ref lines with an existing remote sha; that gap is how the first-push scan bug shipped
 
 ## Usage                (CLI / tool)
 

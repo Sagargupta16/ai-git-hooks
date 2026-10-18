@@ -1,5 +1,6 @@
 # AI Git Hooks
 
+[![Test Hooks](https://github.com/Sagargupta16/ai-git-hooks/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/Sagargupta16/ai-git-hooks/actions/workflows/test.yml)
 ![GitHub stars](https://img.shields.io/github/stars/Sagargupta16/ai-git-hooks?style=flat-square&cacheSeconds=86400)
 ![GitHub forks](https://img.shields.io/github/forks/Sagargupta16/ai-git-hooks?style=flat-square&cacheSeconds=86400)
 ![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)
@@ -18,11 +19,51 @@ Drop-in git hooks that use AI (Claude, OpenAI, Ollama) to automate code quality 
 | [Commit Message Validator](hooks/commit-msg/) | Validates commit messages follow conventions | `commit-msg` |
 | [Pre-Push Security Scan](hooks/pre-push/) | Scans for secrets, vulnerabilities, and large files | `pre-push` |
 
+## How It Works
+
+Each hook is a standalone Bash script. There is no daemon, no package and no
+runtime beyond `git`, `curl` and `jq`: the installer copies the four scripts into
+the hooks directory git reports for your project, and git runs them.
+
+```mermaid
+flowchart LR
+    A[git commit] --> B[pre-commit<br/>ai-review.sh]
+    B -->|staged diff| P{{provider<br/>Claude / OpenAI / Ollama}}
+    P -->|SEVERITY/FILE:LINE/DESC/FIX lines| B
+    B -->|blocks at configured severity| C[prepare-commit-msg<br/>auto-message.sh]
+    C -->|staged diff + style + ticket budget| P
+    C --> D[commit-msg<br/>validate.sh]
+    D -->|only on failure, suggest_fix| P
+    D --> E[commit created]
+    F[git push] --> G[pre-push<br/>security-scan.sh]
+    G -->|regex secret scan, file size,<br/>npm audit / pip-audit| H{critical?}
+    H -->|yes| X[push blocked]
+    H -->|no| Y[push proceeds]
+    CFG[(.ai-hooks.yml)] -.-> B & C & D & G
+```
+
+Design decisions worth knowing:
+
+- **The secret scan is deterministic.** `pre-push` makes no AI call. A model can
+  miss a key or hallucinate one, so blocking a push is left to regex patterns
+  that behave the same on every run.
+- **The model gets a line protocol, not free text.** The review prompt asks for
+  `SEVERITY|FILE:LINE|DESCRIPTION|SUGGESTION` lines or `NO_ISSUES`, which the
+  hook parses into counts and compares against `severity` to decide whether the
+  commit is blocked.
+- **The generator and the validator agree.** `prepare-commit-msg` spends the
+  ticket prefix (`PROJ-42: `) out of the same `max_length` budget that
+  `commit-msg` enforces, and the validator accepts that prefix, so the two
+  default-enabled hooks never reject each other's output.
+- **Every provider call is optional in CI.** `AI_HOOKS_DRY_RUN=1` replaces each
+  call with a fixed response, so the 47-case suite in `scripts/test.sh` runs on
+  ubuntu and macOS with no API key.
+
 ## Requirements
 
 | Requirement | Notes |
 |-------------|-------|
-| `git` | The hooks read the staged diff and the branch name |
+| `git` 2.31+ | The hooks read the staged diff and the branch name. The installer uses `rev-parse --path-format=absolute` |
 | `bash` | Every hook and script uses `#!/usr/bin/env bash`. CI runs the suite on ubuntu-latest and macos-latest |
 | `curl` | Used for every provider API call |
 | `jq` | Required. Hooks refuse to call a provider without it: `brew install jq` / `apt install jq` |
@@ -47,8 +88,16 @@ cd /path/to/your-project
 ~/tools/ai-git-hooks/scripts/install.sh ~/tools/ai-git-hooks
 ```
 
-The installer copies the four hooks into `your-project/.git/hooks/` and creates
-`your-project/.ai-hooks.yml`. Run it once per project you want the hooks in.
+The installer copies the four hooks into the hooks directory git reports for
+your project (`git rev-parse --git-path hooks`, normally `.git/hooks/`) and
+creates `.ai-hooks.yml` at the project root. Linked worktrees, submodules and a
+`core.hooksPath` setting all resolve to the directory git actually runs. Run it
+once per project you want the hooks in.
+
+If the project uses husky, do not run the installer: it would replace husky's
+own hook files (backed up as `<hook>.backup`), and the next `husky` run
+regenerates them and drops the AI hooks. Call the hook scripts from your husky
+hooks instead.
 
 ### 3. Configure
 
@@ -61,7 +110,7 @@ model: claude-sonnet-5      # model to use
 hooks:
   pre-commit:
     enabled: true
-    severity: warn          # error | warn | info
+    severity: error         # error | warn | info
     max_files: 20
     ignore:
       - "*.lock"
@@ -110,22 +159,25 @@ Reviews staged changes and catches issues before they're committed.
 - Performance anti-patterns
 - Missing error handling
 
-**Example output:**
+**Example output** (the review lines depend on what the model returns):
 ```
-AI Code Review (3 files changed)
+[INFO] Reviewing 3 file(s)...
+  src/api/users.js
+  src/components/Dashboard.tsx
+  src/utils/parse.js
 
-src/api/users.js:42
-  WARNING: SQL query uses string concatenation instead of parameterized query.
+[WARN] src/api/users.js:42
+  SQL query uses string concatenation instead of a parameterized query.
   Fix: Use db.query('SELECT * FROM users WHERE id = $1', [id])
 
-src/components/Dashboard.tsx:108
-  INFO: useEffect missing dependency 'userId' in dependency array.
+[INFO] src/components/Dashboard.tsx:108
+  useEffect is missing 'userId' in its dependency array.
 
-src/utils/parse.js
-  OK: No issues found.
-
-Summary: 1 warning, 1 info, 0 errors
+Summary: 0 error(s), 1 warning(s), 1 info
 ```
+
+With `severity: warn` that warning blocks the commit; with the default
+`severity: error` it is reported and the commit proceeds.
 
 ### Prepare-Commit-Msg: Auto-Generate Messages
 
@@ -147,33 +199,55 @@ git commit
 Ensures commit messages follow your team's conventions.
 
 ```
-Commit Message Validation
+[ERROR] Commit message validation failed.
+
 Message: "fixed stuff"
 
-ERRORS:
-  - Type prefix missing. Expected: feat|fix|docs|style|refactor|test|chore
-  - Message too vague. Describe what was fixed and why.
+Errors:
+  - Subject does not match conventional commit format: type(scope): description
 
-Suggested: "fix: resolve null pointer in user authentication flow"
+[INFO] Asking AI for a suggested fix...
+Suggested message:
+  fix: resolve null pointer in user authentication flow
+
+[INFO] Fix your commit message and try again.
+[INFO] Use 'git commit --no-verify' to bypass this check.
 ```
+
+The checks are rule-based: conventional format, allowed type, subject length,
+no trailing period, lowercase description, blank second line. The provider is
+only asked for the suggested rewrite.
 
 ### Pre-Push: Security Scan
 
-Scans all commits about to be pushed for security issues.
+Scans the net diff of the commits about to be pushed. For a new branch that is
+everything not already on a remote; for the first push of a repo it is every
+file. A secret added in one commit and deleted in a later one in the same push
+is not in the net diff, so it is not caught.
 
 ```
-Pre-Push Security Scan
+[INFO] Scanning for secrets...
+[CRITICAL] Possible Anthropic API Key found
+  const API_KEY = "***REDACTED***";
+  Action: Remove the secret and rotate it immediately.
 
-CRITICAL: Possible API key found in src/config.js:8
-  Line: const API_KEY = "sk-ant-api03-..."
-  Action: Remove the key and rotate it immediately.
+[INFO] Checking for large files...
+[WARN] Large file detected: assets/video.mp4 (45 MB)
+  Maximum allowed: 5 MB
+  Action: Consider Git LFS or add to .gitignore.
 
-WARNING: Large file detected: assets/video.mp4 (45 MB)
-  Action: Consider Git LFS or .gitignore.
+--------------------------------------
+Scan complete: 1 critical, 1 warning(s), 0 info
 
-Scan complete: 1 critical, 1 warning
-Push blocked due to critical finding.
+[ERROR] Push blocked due to 1 critical finding(s).
+[INFO] Fix the issues above or use 'git push --no-verify' to bypass.
 ```
+
+Built-in patterns cover AWS, GitHub (classic and fine-grained), Anthropic,
+OpenAI (legacy and `sk-proj-` / `sk-svcacct-` / `sk-admin-`), Google, Slack,
+Stripe, Twilio and SendGrid keys, PEM private keys, database connection strings
+with an inline password, and quoted `password` / `secret` / `api_key` /
+`access_token` / `auth_token` assignments. The matched value is redacted before it is printed.
 
 ## What Runs On Every Commit
 
