@@ -16,6 +16,8 @@ set -euo pipefail
 #   OPENAI_API_KEY     - Required for OpenAI provider
 #   OLLAMA_HOST        - Ollama server URL (default: http://localhost:11434)
 #   AI_HOOKS_DRY_RUN   - Set to "1" to skip API calls and use mock responses
+#   AI_HOOKS_MOCK_RESPONSE - With dry-run, the text to use as the provider's
+#                        reply (default NO_ISSUES). Used by the test suite.
 #   AI_HOOKS_DEBUG      - Set to "1" for verbose output
 # ============================================================================
 
@@ -440,8 +442,11 @@ ${diff_content}"
   echo "${response}" | jq -r '.response // empty' 2>/dev/null
 }
 
+# Dry-run stands in for the provider with NO_ISSUES. AI_HOOKS_MOCK_RESPONSE
+# replaces that text, so the test suite can feed the parser a provider response
+# (findings, malformed lines) without an API key.
 mock_response() {
-  echo "NO_ISSUES"
+  echo "${AI_HOOKS_MOCK_RESPONSE:-NO_ISSUES}"
 }
 
 # --- Response Parsing ---
@@ -457,8 +462,11 @@ parse_and_display() {
     return 1
   fi
 
-  # Check for clean bill of health
-  if echo "${response}" | grep -qi "NO_ISSUES"; then
+  # Clean bill of health: NO_ISSUES and not a single finding line. Testing for
+  # the token alone let a response that listed ERROR lines and then closed with
+  # NO_ISSUES skip the block decision entirely.
+  if echo "${response}" | grep -qi "NO_ISSUES" \
+    && ! echo "${response}" | grep -qE '^ *(ERROR|WARNING|INFO) *\|'; then
     print_pass "No issues found. Code looks good!"
     echo ""
     return 0

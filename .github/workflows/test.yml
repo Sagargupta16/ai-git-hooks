@@ -113,3 +113,15 @@ jobs:
           ! test -f /tmp/test-project/.git/hooks/commit-msg
           ! test -f /tmp/test-project/.git/hooks/pre-push
           echo "All hooks removed successfully"
+
+      - name: Validate the pre-commit framework manifest
+        run: pipx run pre-commit validate-manifest .pre-commit-hooks.yaml
+
+      # The README demo comes from this script, so it has to keep showing the
+      # rejected message and the blocked push.
+      - name: Run the demo
+        run: |
+          ./scripts/demo.sh 2>&1 | tee /tmp/demo.txt
+          grep -q "Commit message validation failed" /tmp/demo.txt
+          grep -q "found in config.js:3" /tmp/demo.txt
+          grep -q "Push blocked due to 1 critical finding" /tmp/demo.txt
