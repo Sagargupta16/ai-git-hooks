@@ -69,10 +69,17 @@ ai-git-hooks/
     pre-push/
       security-scan.sh       # Scan for secrets and vulnerabilities
   scripts/
+    get.sh                   # One-line installer (clone, then install.sh)
     install.sh               # Install hooks into a project
     uninstall.sh             # Remove hooks from a project
     test.sh                  # Run tests against sample diffs
+    demo.sh                  # Run the hooks in a throwaway repo (dry-run)
+    benchmark.sh             # Score the secret scan on the leaky-repo corpus
+  docs/
+    benchmark.md             # Latest benchmark results
+    demo/                    # README demo SVGs and the data they come from
   .ai-hooks.example.yml     # Example configuration
+  .pre-commit-hooks.yaml    # Manifest for the pre-commit framework
   package.json               # npm package metadata
 ```
 
@@ -151,7 +158,22 @@ You can test hook logic without an AI provider by setting:
 export AI_HOOKS_DRY_RUN=1
 ```
 
-This will skip API calls and use mock responses.
+This will skip API calls and use mock responses. To test how the review hook
+handles a particular provider reply, set `AI_HOOKS_MOCK_RESPONSE` to that reply
+as well; the dry-run uses it instead of `NO_ISSUES`.
+
+### Changing Secret Patterns
+
+A new or changed pattern in `hooks/pre-push/security-scan.sh` needs a name at
+the same index in `SECRET_NAMES`, a test in `test_pre_push`, and a benchmark
+run before and after:
+
+```bash
+./scripts/benchmark.sh --noise            # add --gitleaks if it is installed
+```
+
+Paste the new numbers into `docs/benchmark.md`. A pattern that raises the noise
+count on the clean projects needs a reason in the PR.
 
 ## Submitting Changes
 

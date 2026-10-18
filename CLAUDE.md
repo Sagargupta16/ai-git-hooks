@@ -55,12 +55,16 @@ shellcheck -x hooks/**/*.sh scripts/*.sh   # lint (CI-gated)
 - Provider auth is env-var only (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) -- never write keys into config files or examples. The Ollama host is not auth: it reads from `ollama.host` in config, with `OLLAMA_HOST` taking precedence.
 - Adding a hook or script means updating two places: `scripts/test.sh` and the README hooks table. CI discovers `hooks/**/*.sh` and `scripts/*.sh` by file scan for both the shellcheck lint and the executable-bit assertion.
 - `hooks.pre-push.ignore` ships empty on purpose. Anything listed there is dropped from the secret scan, so a default entry would silently shrink coverage for every user.
+- `SECRET_PATTERNS` and `SECRET_NAMES` in `security-scan.sh` are parallel arrays; keep them the same length. Rerun `./scripts/benchmark.sh --gitleaks --noise` after any pattern change and update `docs/benchmark.md` and the README numbers from its output.
+- Under the pre-commit framework the hooks get no git stdin or `$2`: pre-push reads `PRE_COMMIT_FROM_REF`/`PRE_COMMIT_TO_REF` (or `PRE_COMMIT_LOCAL_BRANCH` on a first push), prepare-commit-msg reads `PRE_COMMIT_COMMIT_MSG_SOURCE`.
+- The README demo SVGs come from `docs/demo/demo.json` (lines copied from `./scripts/demo.sh` output) rendered with svg-forge's `forge.py --kind typing --timing long --width 880 --theme both`.
 
 ## Install              (CLI / tool)
 
 - Clone somewhere permanent, then from the target project root: `/path/to/ai-git-hooks/scripts/install.sh /path/to/ai-git-hooks`
 - `install.sh` resolves the target from the current directory (`git rev-parse --show-toplevel`, hooks dir from `--git-path hooks`), so running it from inside the ai-git-hooks clone installs the hooks into the clone and leaves the user's project untouched
-- The pre-push new-branch path (remote sha all zeros) is not covered by `scripts/test.sh`, which only feeds ref lines with an existing remote sha; that gap is how the first-push scan bug shipped
+- One-line install: `curl -fsSL https://raw.githubusercontent.com/Sagargupta16/ai-git-hooks/main/scripts/get.sh | bash` clones to `~/.ai-git-hooks` and runs `install.sh`. pre-commit framework users consume `.pre-commit-hooks.yaml` instead (needs a git tag for `rev:`)
+- `scripts/test.sh` covers the pre-push first-push and new-branch paths (remote sha all zeros); that gap is how the first-push scan bug shipped in 1.0.0
 
 ## Usage                (CLI / tool)
 

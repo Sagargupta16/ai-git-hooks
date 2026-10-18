@@ -1,0 +1,33 @@
+{
+  "title": "scripts/demo.sh (dry-run)",
+  "prompt": "$",
+  "lines": [
+    {
+      "cmd": "git commit -m \"fixed stuff\"",
+      "out": [
+        "[ERROR] Commit message validation failed.",
+        "  - Subject does not match conventional commit format: type(scope): description"
+      ],
+      "tone": "warn"
+    },
+    {
+      "cmd": "git commit",
+      "out": [
+        "[PASS] No issues found. Code looks good!",
+        "[PASS] Commit message generated:",
+        "feat: update project files",
+        "[PASS] Commit message is valid."
+      ],
+      "tone": "ok"
+    },
+    {
+      "cmd": "git push origin HEAD",
+      "out": [
+        "[CRITICAL] Possible AWS Access Key ID found in config.js:3",
+        "    accessKeyId: \"***REDACTED***\",",
+        "[ERROR] Push blocked due to 1 critical finding(s)."
+      ],
+      "tone": "warn"
+    }
+  ]
+}
