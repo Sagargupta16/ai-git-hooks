@@ -58,6 +58,7 @@ shellcheck -x hooks/**/*.sh scripts/*.sh   # lint (CI-gated)
 - `SECRET_PATTERNS` and `SECRET_NAMES` in `security-scan.sh` are parallel arrays; keep them the same length. Rerun `./scripts/benchmark.sh --gitleaks --noise` after any pattern change and update `docs/benchmark.md` and the README numbers from its output.
 - Under the pre-commit framework the hooks get no git stdin or `$2`: pre-push reads `PRE_COMMIT_FROM_REF`/`PRE_COMMIT_TO_REF` (or `PRE_COMMIT_LOCAL_BRANCH` on a first push), prepare-commit-msg reads `PRE_COMMIT_COMMIT_MSG_SOURCE`.
 - The README demo SVGs come from `docs/demo/demo.json` (lines copied from `./scripts/demo.sh` output) rendered with svg-forge's `forge.py --kind typing --timing long --width 880 --theme both`.
+- The How It Works flowchart comes from `docs/diagrams/hook-flow.yaml`, rendered with orrery (the command is in the spec's header). Its notes quote the pattern count and the 5 MB default, so re-render it when a hook's outcome, provider call or those numbers change; `orrery verify` checks its `evidence:` lines still match the hooks.
 
 ## Install              (CLI / tool)
 

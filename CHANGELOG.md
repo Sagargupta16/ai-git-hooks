@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.2.1] - 2026-10-21
+
+- README: replace the Mermaid sketch in How It Works with a flowchart drawn with [orrery](https://github.com/Sagargupta16/orrery), in light and dark versions. It shows each hook's block or pass outcome, which hooks call the provider set in `.ai-hooks.yml` (Claude, OpenAI or Ollama), and the three pre-push checks that call no model. The spec is [docs/diagrams/hook-flow.yaml](docs/diagrams/hook-flow.yaml), with `evidence:` pointing at the hook code behind each step
+
 ## [1.2.0] - 2026-10-18
 
 - Add a `.pre-commit-hooks.yaml` manifest, so the four hooks install through the pre-commit framework (`ai-review`, `ai-commit-message`, `commit-msg-validate`, `secret-scan`). Under pre-commit, the pre-push scan reads its range from `PRE_COMMIT_FROM_REF` / `PRE_COMMIT_TO_REF`, or scans the whole branch from `PRE_COMMIT_LOCAL_BRANCH` when the push includes the root commit, and prepare-commit-msg reads `PRE_COMMIT_COMMIT_MSG_SOURCE`, so `git commit -m` messages are left alone. Checked end to end with pre-commit 4.7.0: a bad message is rejected, and both a first push and a new-branch push with a key are blocked

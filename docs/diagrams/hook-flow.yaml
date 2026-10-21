@@ -1,0 +1,50 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Sagargupta16/orrery/main/skills/orrery/references/diagram.schema.json
+# Rendered with orrery (github.com/Sagargupta16/orrery):
+#   orrery render docs/diagrams/hook-flow.yaml -o docs/diagrams/hook-flow -f svg --theme both
+# Reviewed at README width: orrery review docs/diagrams/hook-flow.yaml --width 880
+title: What runs on git commit and git push
+subtitle: Three hooks ask the provider set in .ai-hooks.yml; the pre-push scan never calls a model
+kind: flowchart
+direction: down
+layout: { aspect: "3:4", spacing: compact }
+legend:
+  dashed: Only when validation fails
+story: [commit, review, findings, message, validate, valid, create, push, secrets, sizes, audit, critical, pushed]
+
+groups:
+  provider: { type: zone, label: "provider: in .ai-hooks.yml", icon: false, evidence: ".ai-hooks.example.yml:15#provider" }
+
+nodes:
+  commit: { shape: terminator, label: git commit }
+  review: { shape: process, label: Review staged diff, note: pre-commit, evidence: "hooks/pre-commit/ai-review.sh:547#main" }
+  findings: { shape: decision, label: Blocking finding?, evidence: "hooks/pre-commit/ai-review.sh:518#SEVERITY" }
+  commit-blocked: { shape: terminator, label: Commit blocked, evidence: "hooks/pre-commit/ai-review.sh:521#Commit blocked" }
+  message: { shape: process, label: Write commit message, note: "prepare-commit-msg, skipped on -m", evidence: "hooks/prepare-commit-msg/auto-message.sh:65#COMMIT_SOURCE" }
+  validate: { shape: process, label: Validate message, note: "commit-msg, rule-based", evidence: "hooks/commit-msg/validate.sh:414#main" }
+  valid: { shape: decision, label: Message valid?, evidence: "hooks/commit-msg/validate.sh:450#valid" }
+  rejected: { shape: terminator, label: Message rejected, evidence: "hooks/commit-msg/validate.sh:484#exit 1" }
+  create: { shape: process, label: Create the commit, note: git }
+  push: { shape: manual, label: Run git push }
+  secrets: { shape: process, label: Scan for secrets, note: "pre-push, 40 regex patterns", evidence: "hooks/pre-push/security-scan.sh:411#scan_secrets_in_range" }
+  sizes: { shape: process, label: Check file sizes, note: "over 5 MB warns", evidence: "hooks/pre-push/security-scan.sh:508#scan_large_files" }
+  audit: { shape: process, label: Audit dependencies, note: "npm audit, pip-audit", evidence: "hooks/pre-push/security-scan.sh:553#scan_dependencies" }
+  critical: { shape: decision, label: Critical finding?, evidence: "hooks/pre-push/security-scan.sh:733#CRITICAL_COUNT" }
+  pushed: { shape: terminator, label: Push proceeds, evidence: "hooks/pre-push/security-scan.sh:745#exit 0" }
+  push-blocked: { shape: terminator, label: Push blocked, evidence: "hooks/pre-push/security-scan.sh:736#exit 1" }
+  claude: { icon: logos:claude-icon, label: Claude, note: api.anthropic.com, in: provider, evidence: "hooks/pre-commit/ai-review.sh:308#api.anthropic.com" }
+  openai: { icon: logos:openai-icon, label: OpenAI, note: api.openai.com, in: provider, evidence: "hooks/pre-commit/ai-review.sh:373#api.openai.com" }
+  ollama: { icon: si:ollama, label: Ollama, note: "localhost:11434", in: provider, evidence: "hooks/pre-commit/ai-review.sh:389#call_ollama" }
+
+edges:
+  - commit -> review -> findings
+  - findings -> commit-blocked: yes
+  - findings -> message: no
+  - message -> validate -> valid
+  - valid -> rejected: no
+  - valid -> create: yes
+  - create -> push -> secrets -> sizes -> audit -> critical
+  - critical -> pushed: no
+  - critical -> push-blocked: yes
+  - review -> provider
+  - message -> provider
+  - validate --> provider: suggest a fix
