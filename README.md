@@ -48,22 +48,13 @@ Each hook is a standalone Bash script. There is no daemon, no package and no
 runtime beyond `git`, `curl` and `jq`: the installer copies the four scripts into
 the hooks directory git reports for your project, and git runs them.
 
-```mermaid
-flowchart LR
-    A[git commit] --> B[pre-commit<br/>ai-review.sh]
-    B -->|staged diff| P{{provider<br/>Claude / OpenAI / Ollama}}
-    P -->|SEVERITY/FILE:LINE/DESC/FIX lines| B
-    B -->|blocks at configured severity| C[prepare-commit-msg<br/>auto-message.sh]
-    C -->|staged diff + style + ticket budget| P
-    C --> D[commit-msg<br/>validate.sh]
-    D -->|only on failure, suggest_fix| P
-    D --> E[commit created]
-    F[git push] --> G[pre-push<br/>security-scan.sh]
-    G -->|regex secret scan, file size,<br/>npm audit / pip-audit| H{critical?}
-    H -->|yes| X[push blocked]
-    H -->|no| Y[push proceeds]
-    CFG[(.ai-hooks.yml)] -.-> B & C & D & G
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/hook-flow-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/diagrams/hook-flow-light.svg">
+  <img width="880" src="docs/diagrams/hook-flow-light.svg" alt="Flowchart of what runs on git commit and git push. git commit runs the pre-commit review of the staged diff, and a blocking finding stops the commit. Otherwise prepare-commit-msg writes the message, skipped on git commit -m, and commit-msg validates it with rules: an invalid message is rejected and a valid one becomes the commit. The review and the message generator send the diff to the one provider set in .ai-hooks.yml, Claude at api.anthropic.com, OpenAI at api.openai.com or Ollama at localhost:11434, and commit-msg asks it for a suggested fix only when validation fails. git push runs the pre-push scan, which calls no model: 40 regex secret patterns, a file size check that warns over 5 MB, and npm audit or pip-audit. A critical finding blocks the push; otherwise the push proceeds.">
+</picture>
+
+The spec behind the picture is [`docs/diagrams/hook-flow.yaml`](docs/diagrams/hook-flow.yaml), rendered with [orrery](https://github.com/Sagargupta16/orrery).
 
 Design decisions worth knowing:
 
