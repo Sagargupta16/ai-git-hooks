@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.2.2] - 2026-10-23
+
+- README: redraw the How It Works flowchart with orrery 0.12.0, which draws the provider icons at 64 px instead of 48 px. The spec is unchanged
+
 ## [1.2.1] - 2026-10-21
 
 - README: replace the Mermaid sketch in How It Works with a flowchart drawn with [orrery](https://github.com/Sagargupta16/orrery), in light and dark versions. It shows each hook's block or pass outcome, which hooks call the provider set in `.ai-hooks.yml` (Claude, OpenAI or Ollama), and the three pre-push checks that call no model. The spec is [docs/diagrams/hook-flow.yaml](docs/diagrams/hook-flow.yaml), with `evidence:` pointing at the hook code behind each step
