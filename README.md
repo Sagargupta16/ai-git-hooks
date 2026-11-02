@@ -109,7 +109,7 @@ branch or tag. Running it again in another project reuses the clone.
 default_install_hook_types: [pre-commit, prepare-commit-msg, commit-msg, pre-push]
 repos:
   - repo: https://github.com/Sagargupta16/ai-git-hooks
-    rev: v1.2.0
+    rev: v1.2.2
     hooks:
       - id: ai-review            # pre-commit: AI code review
       - id: ai-commit-message    # prepare-commit-msg: generated message
