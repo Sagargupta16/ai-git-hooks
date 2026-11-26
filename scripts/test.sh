@@ -971,6 +971,29 @@ PROBE_EOF
   fi
   cleanup_test_repo
 
+  # Test: a file name with a space is still sized. The sizes come from one
+  # 'git cat-file --batch-check' call, which would read "<ref>:big file.txt"
+  # as missing if each input line were split at its first space.
+  setup_test_repo
+  cat > .ai-hooks.yml <<'PROBE_EOF'
+hooks:
+  pre-push:
+    enabled: true
+    scan_secrets: true
+    max_file_size: 1KB
+PROBE_EOF
+  ref_line=$(commit_and_ref_line "big file.txt" "$(head -c 2048 /dev/zero | tr '\0' 'a')")
+  if output=$(echo "${ref_line}" | bash "${hook}" 2>&1); then
+    if echo "${output}" | grep -q "Large file detected: big file.txt (2 KB)"; then
+      pass "Large file: name with a space sized from its blob"
+    else
+      fail "Large file: expected 'big file.txt (2 KB)'" "$(echo "${output}" | tail -5)"
+    fi
+  else
+    fail "Large file: a size warning should not block the push" "$(echo "${output}" | tail -3)"
+  fi
+  cleanup_test_repo
+
   # Test: under the pre-commit framework the range arrives as
   # PRE_COMMIT_FROM_REF / PRE_COMMIT_TO_REF, with nothing on stdin
   setup_test_repo
