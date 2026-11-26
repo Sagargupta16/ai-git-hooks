@@ -522,14 +522,14 @@ scan_large_files() {
   # Measure the blob in the commit being pushed, not the working-tree file.
   # 'wc -c < file' measured whatever was checked out, so pushing another branch
   # sized the wrong content and a file deleted locally was skipped entirely.
-  local to_ref="${range##*..}"
-
-  while IFS= read -r file; do
+  # One cat-file call answers for every file, in order. No %(rest), which would
+  # split "<ref>:my file" at the space; a "missing" or absent answer is size 0.
+  local to_ref="${range##*..}" sizes file_size
+  sizes=$(while IFS= read -r file; do [[ -n "${file}" ]] && printf '%s:%s\n' "${to_ref}" "${file}"; done <<< "${files}" \
+    | git cat-file --batch-check='%(objectsize)' 2>/dev/null || true)
+  while IFS= read -r file <&3; do
     [[ -z "${file}" ]] && continue
-
-    local file_size
-    file_size=$(git cat-file -s "${to_ref}:${file}" 2>/dev/null || echo "0")
-
+    { IFS= read -r file_size <&4 && [[ "${file_size}" =~ ^[0-9]+$ ]]; } || file_size=0
     if [[ "${file_size}" -gt "${MAX_FILE_SIZE}" ]]; then
       local human_size
       human_size=$(format_size "${file_size}")
@@ -543,7 +543,7 @@ scan_large_files() {
       ((WARNING_COUNT++)) || true
       found_large=1
     fi
-  done <<< "${files}"
+  done 3<<< "${files}" 4<<< "${sizes}"
 
   if [[ "${found_large}" -eq 0 ]]; then
     print_pass "No large files detected."

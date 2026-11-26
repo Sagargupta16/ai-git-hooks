@@ -70,7 +70,7 @@ Design decisions worth knowing:
   `commit-msg` enforces, and the validator accepts that prefix, so the two
   default-enabled hooks never reject each other's output.
 - **Every provider call is optional in CI.** `AI_HOOKS_DRY_RUN=1` replaces each
-  call with a fixed response, so the 68-case suite in `scripts/test.sh` runs on
+  call with a fixed response, so the 69-case suite in `scripts/test.sh` runs on
   ubuntu and macOS with no API key. `AI_HOOKS_MOCK_RESPONSE` swaps in a
   provider reply, which is how the suite tests the review parser on findings.
 
@@ -289,8 +289,9 @@ Scan complete: 1 critical, 1 warning(s), 0 info
 ```
 
 Each finding names the file and the line in that file. The size check reads
-the blob in the pushed commit (`git cat-file -s`), so it sees what is being
-pushed even when the file has since changed or been deleted locally.
+the blobs in the pushed commit (one `git cat-file --batch-check` call for every
+changed file), so it sees what is being pushed even when a file has since
+changed or been deleted locally.
 
 Built-in patterns (40) cover AWS, GitHub (classic and fine-grained), Anthropic,
 OpenAI (legacy and `sk-proj-` / `sk-svcacct-` / `sk-admin-`), Google, Slack,

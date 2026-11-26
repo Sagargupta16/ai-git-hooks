@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.2.3] - 2026-11-26
+
+- Speed up the pre-push large-file check on big pushes. It started one `git cat-file -s` process per changed file and now gets every size from one `git cat-file --batch-check` call. On a 400-file first push under Git Bash for Windows the size lookup went from 18.3 s to 0.3 s and the whole dry-run scan from about 30 s to 6 to 8 s. The warnings and counts are the same: a deleted file is still skipped, a path with no blob behind it (a submodule, a name git has to quote) still counts as 0 bytes, and a name with spaces is still sized
+- Add a test for a large file with a space in its name (68 to 69)
+
 ## [1.2.2] - 2026-10-23
 
 - README: redraw the How It Works flowchart with orrery 0.12.0, which draws the provider icons at 64 px instead of 48 px. The spec is unchanged
